@@ -7,6 +7,8 @@
 
 import SwiftUI
 
+// MARK: - Motivational Messages
+
 private let motivationalMessages: [String] = [
     "Every day is a fresh page in your story.",
     "Small steps forward are still progress.",
@@ -27,29 +29,52 @@ private let motivationalMessages: [String] = [
     "Every entry is a gift to your future self.",
 ]
 
+// MARK: - Content View
+
 struct ContentView: View {
     @State private var store = JournalStore()
     @State private var showingNewEntry = false
+    @State private var showingWeeklyInsight = false
+    @State private var appeared = false
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                carouselView
-                    .padding(.top, 8)
-                    .padding(.bottom, 12)
+            ZStack {
+                // Mood gradient background
+                MoodGradientBackground(moodScore: latestMoodScore)
 
-                if store.entries.isEmpty {
-                    emptyState
-                        .frame(maxHeight: .infinity)
-                } else {
-                    entryList
+                VStack(spacing: 0) {
+                    carouselView
+                        .padding(.top, 8)
+                        .padding(.bottom, 12)
+
+                    if store.entries.isEmpty {
+                        emptyState
+                            .frame(maxHeight: .infinity)
+                    } else {
+                        entryList
+                    }
                 }
             }
             .navigationTitle("Journal")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    if !store.moodSummaries.isEmpty {
+                        Button {
+                            showingWeeklyInsight = true
+                            BJHaptic.soft()
+                        } label: {
+                            Image(systemName: "chart.line.uptrend.xyaxis.circle.fill")
+                                .font(.title3)
+                                .symbolRenderingMode(.hierarchical)
+                                .foregroundStyle(.purple)
+                        }
+                    }
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Button {
                         showingNewEntry = true
+                        BJHaptic.soft()
                     } label: {
                         Image(systemName: "square.and.pencil")
                     }
@@ -58,13 +83,38 @@ struct ContentView: View {
             .sheet(isPresented: $showingNewEntry) {
                 EntryEditorView(store: store)
             }
+            .sheet(isPresented: $showingWeeklyInsight) {
+                NavigationStack {
+                    WeeklyInsightView(
+                        summaries: store.moodSummaries,
+                        insight: store.journalInsight,
+                        profile: store.personalityProfile
+                    )
+                    .navigationTitle("Insights")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Done") { showingWeeklyInsight = false }
+                        }
+                    }
+                }
+            }
         }
+        .onAppear { appeared = true }
+    }
+
+    // MARK: - Computed
+
+    private var latestMoodScore: MoodScore? {
+        store.entries.first?.moodScore
     }
 
     private var dailyMessage: String {
         let dayIndex = Calendar.current.ordinality(of: .day, in: .era, for: Date()) ?? 0
         return motivationalMessages[dayIndex % motivationalMessages.count]
     }
+
+    // MARK: - Carousel
 
     private var carouselView: some View {
         let current = store.currentStreak
@@ -85,7 +135,7 @@ struct ContentView: View {
             .padding(20)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(
-                RoundedRectangle(cornerRadius: 16)
+                RoundedRectangle(cornerRadius: BJDesign.Radius.large)
                     .fill(.ultraThinMaterial)
             )
             .padding(.horizontal, 16)
@@ -106,13 +156,31 @@ struct ContentView: View {
                 .padding(20)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(
-                    RoundedRectangle(cornerRadius: 16)
+                    RoundedRectangle(cornerRadius: BJDesign.Radius.large)
                         .fill(.ultraThinMaterial)
                 )
                 .padding(.horizontal, 16)
             }
 
-            // Slide 3: Streak insights
+            // Slide 3: Mood Ring (if enough data)
+            if !store.moodSummaries.isEmpty {
+                VStack(spacing: 8) {
+                    MoodRingView(
+                        averageValence: store.moodSummaries.map(\.averageValence).reduce(0, +) / Double(max(1, store.moodSummaries.count)),
+                        averageArousal: store.moodSummaries.map(\.averageArousal).reduce(0, +) / Double(max(1, store.moodSummaries.count))
+                    )
+                    .frame(width: 90, height: 90)
+                }
+                .padding(20)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(
+                    RoundedRectangle(cornerRadius: BJDesign.Radius.large)
+                        .fill(.ultraThinMaterial)
+                )
+                .padding(.horizontal, 16)
+            }
+
+            // Slide 4: Streak insights
             HStack(spacing: 24) {
                 VStack(spacing: 6) {
                     Image(systemName: "flame.fill")
@@ -146,7 +214,7 @@ struct ContentView: View {
             .padding(20)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(
-                RoundedRectangle(cornerRadius: 16)
+                RoundedRectangle(cornerRadius: BJDesign.Radius.large)
                     .fill(.ultraThinMaterial)
             )
             .padding(.horizontal, 16)
@@ -155,21 +223,30 @@ struct ContentView: View {
         .frame(height: 160)
     }
 
+    // MARK: - Empty State
+
     private var emptyState: some View {
         VStack(spacing: 12) {
             Image(systemName: "book.closed")
                 .font(.system(size: 56))
                 .foregroundStyle(.secondary)
+                .scaleEffect(appeared ? 1.0 : 0.8)
+                .animation(BJAnimation.springGentle, value: appeared)
+
             Text("No Entries Yet")
-                .font(.title2)
-                .fontWeight(.semibold)
+                .font(BJDesign.Typography.title)
+
             Text("Tap the pencil icon to write your first entry.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }
         .padding()
+        .opacity(appeared ? 1.0 : 0)
+        .animation(BJAnimation.moodTransition, value: appeared)
     }
+
+    // MARK: - Entry List
 
     private var entryList: some View {
         List {
@@ -181,41 +258,140 @@ struct ContentView: View {
             .onDelete(perform: store.delete)
         }
         .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
     }
 }
 
+// MARK: - Entry Row
+
 struct EntryRowView: View {
     let entry: JournalEntry
+    @State private var appeared = false
 
     private var formattedDate: String {
         entry.date.formatted(date: .abbreviated, time: .omitted)
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if let collage = entry.collage, !collage.isEmpty {
-                CollageDisplayView(collageData: collage, height: 120)
+        HStack(spacing: 0) {
+            // Mood indicator bar
+            MoodIndicatorBar(sentiment: entry.sentiment)
+                .padding(.vertical, 4)
+
+            VStack(alignment: .leading, spacing: 6) {
+                // Photo collage thumbnail
+                if let collage = entry.collage, !collage.isEmpty {
+                    CollageDisplayView(collageData: collage, height: 100)
+                        .clipShape(RoundedRectangle(cornerRadius: BJDesign.Radius.small))
+                }
+
+                // Drawing thumbnail
+                if let drawingID = entry.drawingID {
+                    DrawingThumbnailView(drawingID: drawingID, height: 70)
+                }
+
+                // Title + date
+                HStack {
+                    Text(entry.title.isEmpty ? "Untitled" : entry.title)
+                        .font(.headline)
+                        .lineLimit(1)
+                    Spacer()
+                    Text(formattedDate)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                // Content preview
+                if !entry.content.isEmpty {
+                    Text(entry.content)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+
+                // Mood badges
+                HStack(spacing: 8) {
+                    if let sentiment = entry.sentiment {
+                        SentimentTagView(sentiment: sentiment)
+                            .transition(.scale.combined(with: .opacity))
+                    }
+
+                    if let score = entry.moodScore {
+                        // Baseline-relative label
+                        if let label = score.baselineLabel {
+                            HStack(spacing: 3) {
+                                Image(systemName: baselineIcon(for: score.baselineZScore))
+                                    .font(.caption2)
+                                Text(label)
+                                    .font(.system(.caption2, design: .rounded))
+                            }
+                            .foregroundStyle(baselineColor(for: score.baselineZScore).opacity(0.8))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(baselineColor(for: score.baselineZScore).opacity(0.1), in: Capsule())
+                        }
+
+                        // Confidence indicator
+                        if score.overallConfidence > 0.3 {
+                            HStack(spacing: 2) {
+                                Image(systemName: confidenceIcon(score.overallConfidence))
+                                    .font(.caption2)
+                                Text(confidenceLabel(score.overallConfidence))
+                                    .font(.system(.caption2, design: .rounded))
+                            }
+                            .foregroundStyle(.purple.opacity(0.6))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(.purple.opacity(0.08), in: Capsule())
+                        }
+
+                        // Conflict warning
+                        if score.hadConflict {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.orange.opacity(0.7))
+                        }
+                    }
+                }
             }
-            HStack {
-                Text(entry.title.isEmpty ? "Untitled" : entry.title)
-                    .font(.headline)
-                    .lineLimit(1)
-                Spacer()
-                Text(formattedDate)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            if !entry.content.isEmpty {
-                Text(entry.content)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-            if let sentiment = entry.sentiment {
-                SentimentTagView(sentiment: sentiment)
-            }
+            .padding(.leading, BJDesign.Spacing.md)
         }
         .padding(.vertical, 4)
+        .opacity(appeared ? 1.0 : 0)
+        .offset(y: appeared ? 0 : 8)
+        .onAppear {
+            withAnimation(BJAnimation.springEntry) {
+                appeared = true
+            }
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func baselineIcon(for zScore: Double?) -> String {
+        guard let z = zScore else { return "ellipsis.circle" }
+        if z > 0.5 { return "arrow.up.circle.fill" }
+        if z < -0.5 { return "arrow.down.circle.fill" }
+        return "equal.circle.fill"
+    }
+
+    private func baselineColor(for zScore: Double?) -> Color {
+        guard let z = zScore else { return .gray }
+        if z > 0.5 { return .green }
+        if z < -0.5 { return .orange }
+        return .blue
+    }
+
+    private func confidenceIcon(_ confidence: Double) -> String {
+        if confidence > 0.7 { return "checkmark.seal.fill" }
+        if confidence > 0.4 { return "circle.dotted.circle" }
+        return "questionmark.circle"
+    }
+
+    private func confidenceLabel(_ confidence: Double) -> String {
+        if confidence > 0.7 { return "High confidence" }
+        if confidence > 0.4 { return "Moderate" }
+        return "Tentative"
     }
 }
 

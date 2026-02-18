@@ -74,6 +74,45 @@ enum Sentiment: String, Codable, CaseIterable {
         case .neutral: return .gray
         }
     }
+
+    // MARK: - Valence / Arousal Mapping
+
+    /// Returns (valence, arousal) for this sentiment.
+    /// Valence: -1.0 (negative) … 1.0 (positive)
+    /// Arousal:  0.0 (calm) … 1.0 (energetic)
+    var valenceArousal: (Double, Double) {
+        switch self {
+        case .happy:       return ( 0.8,  0.6)
+        case .grateful:    return ( 0.7,  0.3)
+        case .calm:        return ( 0.4,  0.1)
+        case .excited:     return ( 0.7,  0.9)
+        case .hopeful:     return ( 0.5,  0.4)
+        case .reflective:  return ( 0.1,  0.2)
+        case .nostalgic:   return ( 0.0,  0.3)
+        case .anxious:     return (-0.5,  0.7)
+        case .sad:         return (-0.7,  0.2)
+        case .frustrated:  return (-0.6,  0.8)
+        case .stressed:    return (-0.4,  0.8)
+        case .neutral:     return ( 0.0,  0.3)
+        }
+    }
+
+    /// Map dimensional valence/arousal back to the nearest categorical sentiment.
+    static func fromValenceArousal(valence: Double, arousal: Double) -> Sentiment {
+        var bestMatch: Sentiment = .neutral
+        var bestDistance = Double.greatestFiniteMagnitude
+
+        for sentiment in Sentiment.allCases {
+            let (v, a) = sentiment.valenceArousal
+            let dist = (v - valence) * (v - valence) + (a - arousal) * (a - arousal)
+            if dist < bestDistance {
+                bestDistance = dist
+                bestMatch = sentiment
+            }
+        }
+
+        return bestMatch
+    }
 }
 
 struct SentimentTagView: View {
