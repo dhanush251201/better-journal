@@ -47,6 +47,7 @@ struct CalibrationLayer: Codable, Sendable, Equatable {
             arousal: signal.arousal,
             confidence: calibrated,
             uncertainty: scaledUncertainty,
+            emotionDistribution: signal.emotionDistribution,  // ← CRITICAL: preserve!
             featureVector: signal.featureVector,
             featureLabels: signal.featureLabels
         )

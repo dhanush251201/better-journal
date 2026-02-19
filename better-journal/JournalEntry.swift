@@ -25,8 +25,22 @@ struct JournalEntry: Identifiable, Codable {
     // Mood: fused multi-modal mood score
     var moodScore: MoodScore?
 
+    // Mood: user-confirmed emotion (human-in-the-loop)
+    var userEmotion: Sentiment?
+
     // Metadata
     var wordCount: Int
+
+    // MARK: - Single Source of Truth
+
+    /// The canonical mood for this entry. Every view should read this.
+    /// Priority: user-confirmed > distribution dominant > legacy sentiment > nil
+    var resolvedEmotion: Sentiment? {
+        if let userEmotion { return userEmotion }
+        if let label = moodScore?.bestEmotionLabel,
+           let s = Sentiment(rawValue: label) { return s }
+        return sentiment
+    }
 
     init(
         id: UUID = UUID(),

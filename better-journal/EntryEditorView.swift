@@ -4,26 +4,13 @@
 //
 //  Created by Dhanush Gowdhaman on 2/11/26.
 //
+//  Unified note editor — single scrollable layout combining
+//  text, photos, and drawing. No tabs.
+//
 
 import SwiftUI
 import PencilKit
 import PhotosUI
-
-// MARK: - Editor Mode
-
-enum EditorMode: String, CaseIterable {
-    case write = "Write"
-    case draw = "Draw"
-    case media = "Media"
-
-    var icon: String {
-        switch self {
-        case .write: return "text.cursor"
-        case .draw:  return "pencil.tip"
-        case .media: return "photo.on.rectangle"
-        }
-    }
-}
 
 // MARK: - Entry Editor
 
@@ -38,8 +25,24 @@ struct EntryEditorView: View {
     @State private var collageData: CollageData
     @State private var drawing: PKDrawing
     @State private var drawingID: UUID?
-    @State private var editorMode: EditorMode = .write
+
+    // UI state
+    @State private var showDrawingCanvas = false
+    @State private var showCamera = false
+    @State private var selectedPhotoItem: PhotosPickerItem?
     @FocusState private var contentFocused: Bool
+
+    // Live mood — uses EmotionDistribution (same algorithm as stored mood)
+    @State private var liveEmotion: Sentiment?
+    @State private var liveValence: Double = 0
+    @State private var liveArousal: Double = 0.35
+    @State private var hasMoodEstimate: Bool = false
+    @State private var analysisTask: Task<Void, Never>?
+
+    // Human-in-the-loop emotion picker
+    @State private var showEmotionPicker = false
+    @State private var emotionCandidates: [EmotionCandidate] = []
+    @State private var savedEntryID: UUID?
 
     init(store: JournalStore, entry: JournalEntry? = nil) {
         self.store = store
@@ -49,10 +52,10 @@ struct EntryEditorView: View {
         _collageData = State(initialValue: entry?.collage ?? CollageData())
         _drawingID = State(initialValue: entry?.drawingID)
 
-        // Load existing drawing if present
         if let dID = entry?.drawingID,
            let loaded = DrawingStorageManager.shared.loadDrawing(id: dID) {
             _drawing = State(initialValue: loaded)
+            _showDrawingCanvas = State(initialValue: true)
         } else {
             _drawing = State(initialValue: PKDrawing())
         }
@@ -60,14 +63,10 @@ struct EntryEditorView: View {
 
     private var isNewEntry: Bool { existingEntry == nil }
 
-    private var currentSentiment: Sentiment? {
+    /// Read the live entry from the store — reacts to store updates.
+    private var storeEntry: JournalEntry? {
         guard let id = existingEntry?.id else { return nil }
-        return store.entries.first(where: { $0.id == id })?.sentiment
-    }
-
-    private var currentMoodScore: MoodScore? {
-        guard let id = existingEntry?.id else { return nil }
-        return store.entries.first(where: { $0.id == id })?.moodScore
+        return store.entries.first(where: { $0.id == id })
     }
 
     private var hasChanges: Bool {
@@ -84,44 +83,71 @@ struct EntryEditorView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                // Mood gradient background
-                MoodGradientBackground(moodScore: currentMoodScore)
+                // Mood-reactive background — emotion-based, same algorithm everywhere
+                if hasMoodEstimate, let live = liveEmotion {
+                    MoodGradientBackground(emotion: live, arousal: liveArousal)
+                } else {
+                    MoodGradientBackground(emotion: storeEntry?.resolvedEmotion)
+                }
 
                 VStack(spacing: 0) {
-                    // Mode selector
-                    modePicker
-                        .padding(.top, BJDesign.Spacing.sm)
-                        .padding(.bottom, BJDesign.Spacing.md)
-
-                    // Content area
+                    // Scrollable content area
                     ScrollView {
-                        VStack(spacing: 0) {
-                            switch editorMode {
-                            case .write:
-                                writeMode
+                        VStack(spacing: BJDesign.Spacing.md) {
+                            // Title
+                            TextField("Title", text: $title)
+                                .font(.title2.weight(.semibold))
+                                .padding(.horizontal)
+                                .padding(.top, BJDesign.Spacing.md)
+                                .submitLabel(.next)
+                                .onSubmit { contentFocused = true }
 
-                            case .draw:
-                                drawMode
+                            Divider()
+                                .padding(.horizontal)
 
-                            case .media:
-                                mediaMode
+                            // Content
+                            TextEditor(text: $content)
+                                .font(.body)
+                                .padding(.horizontal, 12)
+                                .focused($contentFocused)
+                                .frame(minHeight: 200)
+                                .scrollContentBackground(.hidden)
+                                .onChange(of: content) { _, _ in
+                                    debounceMoodAnalysis()
+                                }
+                                .onChange(of: title) { _, _ in
+                                    debounceMoodAnalysis()
+                                }
+
+                            // Photos (inline)
+                            if !collageData.isEmpty {
+                                inlinePhotosSection
                             }
 
-                            // Mood display
-                            if let sentiment = currentSentiment {
+                            // Drawing (inline, toggleable)
+                            if showDrawingCanvas {
+                                inlineDrawingSection
+                            }
+
+                            // Mood display — single source of truth
+                            if let emotion = storeEntry?.resolvedEmotion ?? liveEmotion {
                                 HStack {
-                                    SentimentTagView(sentiment: sentiment)
+                                    SentimentTagView(sentiment: emotion)
                                     Spacer()
-                                    if let score = currentMoodScore {
+                                    if let score = storeEntry?.moodScore {
                                         moodConfidenceView(score)
                                     }
                                 }
                                 .padding(.horizontal)
-                                .padding(.top, BJDesign.Spacing.md)
                                 .transition(.opacity.combined(with: .scale(scale: 0.9)))
                             }
+
+                            Spacer(minLength: 80)
                         }
                     }
+
+                    // Attachment toolbar
+                    attachmentToolbar
                 }
             }
             .navigationTitle(isNewEntry ? "New Entry" : "Edit Entry")
@@ -138,97 +164,143 @@ struct EntryEditorView: View {
                         .disabled(!hasChanges)
                 }
             }
+            .fullScreenCover(isPresented: $showCamera) {
+                CameraView { image in
+                    addPhoto(image)
+                }
+            }
+            .onChange(of: selectedPhotoItem) { _, item in
+                guard let item else { return }
+                Task {
+                    if let data = try? await item.loadTransferable(type: Data.self),
+                       let image = UIImage(data: data) {
+                        addPhoto(image)
+                    }
+                    selectedPhotoItem = nil
+                }
+            }
+            .sheet(isPresented: $showEmotionPicker) {
+                emotionPickerSheet
+            }
         }
     }
 
-    // MARK: - Mode Picker
+    // liveSentiment removed — liveEmotion @State is set directly from analyzeSignal()
 
-    private var modePicker: some View {
-        HStack(spacing: 0) {
-            ForEach(EditorMode.allCases, id: \.self) { mode in
+    // MARK: - Inline Photos Section
+
+    private var inlinePhotosSection: some View {
+        VStack(spacing: 8) {
+            CollageDisplayView(collageData: collageData, height: 180)
+                .clipShape(RoundedRectangle(cornerRadius: BJDesign.Radius.medium))
+                .padding(.horizontal)
+
+            // Remove photos button
+            HStack {
+                Spacer()
                 Button {
                     withAnimation(BJAnimation.quickFade) {
-                        editorMode = mode
+                        // Delete all photos
+                        PhotoStorageManager.shared.deleteImages(ids: collageData.photoIDs)
+                        collageData = CollageData()
                     }
-                    BJHaptic.selection()
+                    BJHaptic.warning()
                 } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: mode.icon)
+                    Label("Remove Photos", systemImage: "trash")
+                        .font(.caption)
+                        .foregroundStyle(.red.opacity(0.7))
+                }
+                .padding(.trailing)
+            }
+        }
+    }
+
+    // MARK: - Inline Drawing Section
+
+    private var inlineDrawingSection: some View {
+        VStack(spacing: 4) {
+            DrawingEditorView(drawing: $drawing)
+                .frame(height: 350)
+                .clipShape(RoundedRectangle(cornerRadius: BJDesign.Radius.medium))
+                .padding(.horizontal)
+
+            HStack {
+                Spacer()
+                Button {
+                    withAnimation(BJAnimation.quickFade) {
+                        drawing = PKDrawing()
+                        showDrawingCanvas = false
+                    }
+                    BJHaptic.warning()
+                } label: {
+                    Label("Remove Drawing", systemImage: "trash")
+                        .font(.caption)
+                        .foregroundStyle(.red.opacity(0.7))
+                }
+                .padding(.trailing)
+            }
+        }
+    }
+
+    // MARK: - Attachment Toolbar
+
+    private var attachmentToolbar: some View {
+        HStack(spacing: 0) {
+            // Camera
+            if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                Button {
+                    showCamera = true
+                    BJHaptic.soft()
+                } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: "camera.fill")
                             .font(.body)
-                        Text(mode.rawValue)
+                        Text("Camera")
                             .font(.system(.caption2, design: .rounded, weight: .medium))
                     }
-                    .foregroundStyle(editorMode == mode ? .primary : .secondary)
+                    .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, BJDesign.Spacing.sm)
-                    .background {
-                        if editorMode == mode {
-                            RoundedRectangle(cornerRadius: BJDesign.Radius.small)
-                                .fill(.ultraThinMaterial)
-                        }
-                    }
                 }
                 .buttonStyle(.plain)
             }
-        }
-        .padding(.horizontal, BJDesign.Spacing.lg)
-    }
 
-    // MARK: - Write Mode
-
-    private var writeMode: some View {
-        VStack(spacing: 0) {
-            // Photo strip preview (if photos exist)
-            if !collageData.isEmpty {
-                CollageDisplayView(collageData: collageData, height: 80)
-                    .clipShape(RoundedRectangle(cornerRadius: BJDesign.Radius.small))
-                    .padding(.horizontal)
-                    .padding(.bottom, BJDesign.Spacing.md)
+            // Gallery
+            PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                VStack(spacing: 3) {
+                    Image(systemName: "photo.on.rectangle.angled")
+                        .font(.body)
+                    Text("Gallery")
+                        .font(.system(.caption2, design: .rounded, weight: .medium))
+                }
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
             }
+            .buttonStyle(.plain)
 
-            // Drawing preview (if drawing exists)
-            if !drawing.strokes.isEmpty, let dID = drawingID {
-                DrawingThumbnailView(drawingID: dID, height: 60)
-                    .padding(.horizontal)
-                    .padding(.bottom, BJDesign.Spacing.md)
+            // Draw toggle
+            Button {
+                withAnimation(BJAnimation.springGentle) {
+                    showDrawingCanvas.toggle()
+                }
+                BJHaptic.soft()
+            } label: {
+                VStack(spacing: 3) {
+                    Image(systemName: showDrawingCanvas ? "pencil.tip.crop.circle.fill" : "pencil.tip.crop.circle")
+                        .font(.body)
+                    Text("Draw")
+                        .font(.system(.caption2, design: .rounded, weight: .medium))
+                }
+                .foregroundStyle(showDrawingCanvas ? .purple : .secondary)
+                .frame(maxWidth: .infinity)
             }
-
-            TextField("Title", text: $title)
-                .font(.title2.weight(.semibold))
-                .padding(.horizontal)
-                .padding(.bottom, BJDesign.Spacing.sm)
-                .submitLabel(.next)
-                .onSubmit { contentFocused = true }
-
-            Divider()
-                .padding(.horizontal)
-
-            TextEditor(text: $content)
-                .font(.body)
-                .padding(.horizontal, 12)
-                .focused($contentFocused)
-                .frame(minHeight: 300)
-                .scrollContentBackground(.hidden)
+            .buttonStyle(.plain)
         }
+        .padding(.vertical, 10)
+        .padding(.horizontal)
+        .background(.ultraThinMaterial)
     }
 
-    // MARK: - Draw Mode
-
-    private var drawMode: some View {
-        DrawingEditorView(drawing: $drawing)
-            .frame(minHeight: 400)
-    }
-
-    // MARK: - Media Mode
-
-    private var mediaMode: some View {
-        VStack(spacing: BJDesign.Spacing.md) {
-            CollageEditorView(collageData: $collageData)
-                .padding(.top, BJDesign.Spacing.sm)
-        }
-    }
-
-    // MARK: - Mood Confidence
+    // MARK: - Mood Confidence View
 
     private func moodConfidenceView(_ score: MoodScore) -> some View {
         HStack(spacing: 4) {
@@ -238,6 +310,131 @@ struct EntryEditorView: View {
                 .font(.system(.caption2, design: .rounded))
         }
         .foregroundStyle(.secondary)
+    }
+
+    // MARK: - Emotion Picker Sheet (Human-in-the-Loop)
+
+    private var emotionPickerSheet: some View {
+        VStack(spacing: 20) {
+            // Header
+            VStack(spacing: 6) {
+                Image(systemName: "brain.head.profile")
+                    .font(.system(size: 32))
+                    .foregroundStyle(.purple)
+                Text("How are you feeling?")
+                    .font(.title3.weight(.semibold))
+                Text("We detected a few possible emotions. Tap the one that feels most accurate.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.top, 24)
+
+            // Emotion candidates as tappable pills
+            VStack(spacing: 12) {
+                ForEach(emotionCandidates, id: \.emotion) { candidate in
+                    if let sentiment = Sentiment(rawValue: candidate.emotion) {
+                        Button {
+                            if let entryID = savedEntryID {
+                                store.confirmUserEmotion(for: entryID, emotion: sentiment)
+                            }
+                            showEmotionPicker = false
+                            BJHaptic.success()
+                        } label: {
+                            HStack {
+                                Image(systemName: sentiment.iconName)
+                                    .font(.title3)
+                                    .foregroundStyle(sentiment.color)
+                                    .frame(width: 32)
+
+                                Text(sentiment.displayName)
+                                    .font(.body.weight(.medium))
+                                    .foregroundStyle(.primary)
+
+                                Spacer()
+
+                                // Probability bar
+                                GeometryReader { geo in
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .fill(sentiment.color.opacity(0.3))
+                                        .frame(width: geo.size.width * candidate.probability)
+                                }
+                                .frame(width: 60, height: 8)
+
+                                Text("\(Int(candidate.probability * 100))%")
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 36, alignment: .trailing)
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 14)
+                            .background(sentiment.color.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .padding(.horizontal)
+
+            // Skip button
+            Button {
+                showEmotionPicker = false
+            } label: {
+                Text("Skip")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.bottom)
+
+            Spacer()
+        }
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
+    }
+
+    // MARK: - Live Mood Analysis
+
+    private func debounceMoodAnalysis() {
+        analysisTask?.cancel()
+        analysisTask = Task {
+            // Wait 1.5 seconds after the user stops typing
+            try? await Task.sleep(for: .seconds(1.5))
+            guard !Task.isCancelled else { return }
+
+            let text = title + " " + content
+            guard text.trimmingCharacters(in: .whitespacesAndNewlines).count >= 10 else { return }
+
+            if let signal = await SentimentAnalyzer.analyzeSignal(title: title, content: content) {
+                // Use the EmotionDistribution's dominant emotion —
+                // same algorithm as stored mood, so preview matches final result.
+                let emotion = signal.emotionDistribution.dominantEmotion
+                await MainActor.run {
+                    withAnimation(BJAnimation.moodTransition) {
+                        liveEmotion = emotion
+                        liveValence = signal.valence
+                        liveArousal = signal.arousal
+                        hasMoodEstimate = true
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Photo Helper
+
+    private func addPhoto(_ image: UIImage) {
+        let id = UUID()
+        PhotoStorageManager.shared.save(image: image, id: id)
+        PhotoStorageManager.shared.saveThumbnail(image: image, id: id)
+        collageData.photoIDs.append(id)
+
+        // Auto-adjust layout
+        switch collageData.photoIDs.count {
+        case 1: collageData.layout = .single
+        case 2: collageData.layout = .sideBySide
+        case 3: collageData.layout = .triLayout
+        default: collageData.layout = .quadGrid
+        }
     }
 
     // MARK: - Save
@@ -256,7 +453,6 @@ struct EntryEditorView: View {
             DrawingStorageManager.shared.saveThumbnail(drawing: drawing, id: dID)
             finalDrawingID = dID
         } else if drawing.strokes.isEmpty && finalDrawingID != nil {
-            // Drawing was cleared
             DrawingStorageManager.shared.delete(id: finalDrawingID!)
             finalDrawingID = nil
         }
@@ -271,14 +467,19 @@ struct EntryEditorView: View {
             updated.wordCount = trimmedContent.split(separator: " ").count
             store.update(updated)
         } else {
+            let entryID = UUID()
             let entry = JournalEntry(
+                id: entryID,
                 title: trimmedTitle,
                 content: trimmedContent,
                 collage: collage,
                 drawingID: finalDrawingID
             )
             store.add(entry)
-            dismiss()
+            savedEntryID = entryID
         }
+
+        // Dismiss immediately — don't make the user wait
+        dismiss()
     }
 }

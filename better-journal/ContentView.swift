@@ -40,8 +40,8 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                // Mood gradient background
-                MoodGradientBackground(moodScore: latestMoodScore)
+                // Mood gradient background — reads from resolvedEmotion
+                MoodGradientBackground(emotion: store.entries.first?.resolvedEmotion)
 
                 VStack(spacing: 0) {
                     carouselView
@@ -104,10 +104,6 @@ struct ContentView: View {
     }
 
     // MARK: - Computed
-
-    private var latestMoodScore: MoodScore? {
-        store.entries.first?.moodScore
-    }
 
     private var dailyMessage: String {
         let dayIndex = Calendar.current.ordinality(of: .day, in: .era, for: Date()) ?? 0
@@ -274,8 +270,8 @@ struct EntryRowView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            // Mood indicator bar
-            MoodIndicatorBar(sentiment: entry.sentiment)
+            // Mood indicator bar — single source of truth
+            MoodIndicatorBar(sentiment: entry.resolvedEmotion)
                 .padding(.vertical, 4)
 
             VStack(alignment: .leading, spacing: 6) {
@@ -309,10 +305,10 @@ struct EntryRowView: View {
                         .lineLimit(2)
                 }
 
-                // Mood badges
+                // Mood badges — all from resolvedEmotion
                 HStack(spacing: 8) {
-                    if let sentiment = entry.sentiment {
-                        SentimentTagView(sentiment: sentiment)
+                    if let emotion = entry.resolvedEmotion {
+                        SentimentTagView(sentiment: emotion)
                             .transition(.scale.combined(with: .opacity))
                     }
 
@@ -357,12 +353,38 @@ struct EntryRowView: View {
             .padding(.leading, BJDesign.Spacing.md)
         }
         .padding(.vertical, 4)
+        .background(moodHaloBackground)
         .opacity(appeared ? 1.0 : 0)
         .offset(y: appeared ? 0 : 8)
         .onAppear {
             withAnimation(BJAnimation.springEntry) {
                 appeared = true
             }
+        }
+    }
+
+    // MARK: - Mood Halo Background
+
+    /// Soft radial glow behind the note, colored by the resolved emotion.
+    @ViewBuilder
+    private var moodHaloBackground: some View {
+        let confidence = entry.moodScore?.overallConfidence ?? 0.3
+
+        if let emotion = entry.resolvedEmotion {
+            let haloColor = emotion.color
+            let intensity = min(0.25, confidence * 0.3)
+
+            RadialGradient(
+                gradient: Gradient(colors: [
+                    haloColor.opacity(intensity),
+                    haloColor.opacity(intensity * 0.4),
+                    Color.clear
+                ]),
+                center: .leading,
+                startRadius: 0,
+                endRadius: 200
+            )
+            .animation(BJAnimation.moodTransition, value: emotion)
         }
     }
 

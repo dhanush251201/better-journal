@@ -2,21 +2,19 @@
 //  DrawingAnalysisEngine.swift
 //  better-journal
 //
-//  Extracts an 8-dimensional feature vector from PencilKit drawings
-//  and maps to valence-arousal via a pre-computed regression matrix.
-//  Outputs ModalitySignal with proper uncertainty.
+//  Kinematic & geometric analysis of PencilKit drawings.
+//  Extracts stroke features (pressure, velocity, jaggedness, coverage,
+//  color) and maps them to an EmotionDistribution via a research-based
+//  feature-to-emotion weight matrix.
 //
-//  Feature vector: [meanPressure, pressureStdDev, meanVelocity,
-//                   velocityStdDev, strokeDensity, coverage,
-//                   spatialEntropy, colorVariance]
+//  Based on: Kang (2014), Kim (2018) affective computing literature.
 //
 
 import PencilKit
 import UIKit
 
-// MARK: - Drawing Feature Vector
+// MARK: - Drawing Features
 
-/// The raw 8D feature vector extracted from a drawing.
 struct DrawingFeatures: Sendable {
     let meanPressure: Double
     let pressureStdDev: Double
@@ -26,15 +24,13 @@ struct DrawingFeatures: Sendable {
     let coverage: Double
     let spatialEntropy: Double
     let colorVariance: Double
-
-    var asArray: [Double] {
-        [meanPressure, pressureStdDev, meanVelocity, velocityStdDev,
-         strokeDensity, coverage, spatialEntropy, colorVariance]
-    }
+    let jaggedness: Double       // NEW: angular change rate
+    let warmColorRatio: Double   // NEW: warm vs cool colors
 
     static let labels = [
         "pressure", "pressure variability", "speed", "speed variability",
-        "stroke density", "canvas coverage", "spatial spread", "color variety"
+        "stroke density", "canvas coverage", "spatial spread", "color variety",
+        "jaggedness", "warm colors"
     ]
 }
 
@@ -42,23 +38,33 @@ struct DrawingFeatures: Sendable {
 
 actor DrawingAnalysisEngine {
 
-    // MARK: - Regression Matrix
+    // MARK: - Feature-to-Emotion Weight Matrix
+    //
+    // Each row maps a feature to emotion category weights.
+    // Features: [pressure, pressureVar, velocity, velocityVar,
+    //            density, coverage, entropy, colorVar, jaggedness, warmColors]
+    //
+    // Emotions: [happy, grateful, calm, excited, hopeful, reflective,
+    //            nostalgic, anxious, sad, frustrated, stressed, neutral]
 
-    /// Pre-computed 2×8 regression weights + 2×1 bias for mapping
-    /// features → (valence, arousal). Derived from published correlations
-    /// in affective computing literature (Kang 2014, Kim 2018).
-    ///
-    /// Output = tanh(W × features + b) for bounded output.
-    ///
-    /// Row 0 = valence weights, Row 1 = arousal weights.
-    private let W: [[Double]] = [
-        // valence: coverage+, entropy+, pressure−, pressureVar−, colorVar+, velocity−
-        [ -0.15, -0.20,  -0.10, -0.12,  0.05,  0.25,  0.15,  0.20 ],
-        // arousal: pressure+, velocity+, density+, coverage+, pressureVar+
-        [  0.30,  0.15,   0.25,  0.10,  0.15,  0.20,  0.05,  0.05 ]
+    private let emotionMatrix: [[Double]] = [
+        // Feature:        hap   gra   cal   exc   hop   ref   nos   anx   sad   fru   str   neu
+        /* pressure    */ [ 0.1,  0.0, -0.2,  0.15, 0.0,  0.0,  0.0,  0.15, -0.1, 0.3,  0.25, 0.0],
+        /* pressVar    */ [ 0.0,  0.0, -0.15, 0.1,  0.0,  0.0,  0.0,  0.2,  0.0,  0.25, 0.15, 0.0],
+        /* velocity    */ [ 0.15, 0.0, -0.2,  0.3,  0.0,  0.0,  0.0,  0.15, -0.15, 0.2, 0.1,  0.0],
+        /* velVar      */ [ 0.0,  0.0, -0.1,  0.15, 0.0,  0.0,  0.0,  0.25, 0.0,  0.15, 0.2,  0.0],
+        /* density     */ [ 0.1,  0.0,  0.0,  0.15, 0.0,  0.0,  0.0,  0.1,  0.0,  0.15, 0.1,  0.0],
+        /* coverage    */ [ 0.2,  0.1,  0.0,  0.25, 0.1,  0.0,  0.0, -0.1, -0.15, 0.0,  0.0,  0.0],
+        /* entropy     */ [ 0.15, 0.0,  0.1,  0.1,  0.05, 0.1,  0.0, -0.1, -0.1,  0.0,  0.0,  0.0],
+        /* colorVar    */ [ 0.2,  0.0,  0.0,  0.25, 0.1,  0.0,  0.0,  0.0,  -0.1, 0.0,  0.0, -0.1],
+        /* jaggedness  */ [-0.15, 0.0, -0.25, 0.0,  0.0,  0.0,  0.0,  0.3,  0.0,  0.35, 0.25, 0.0],
+        /* warmColors  */ [ 0.3,  0.15, 0.0,  0.2,  0.1,  0.0,  0.0,  0.0,  -0.2, 0.0,  0.0,  0.0],
     ]
 
-    private let bias: [Double] = [0.05, 0.10]  // slight positive/active priors
+    private let bias: [Double] = [
+        // hap   gra   cal   exc   hop   ref   nos  anx   sad   fru   str   neu
+        0.08, 0.02, 0.1, 0.05, 0.03, 0.05, 0.02, 0.02, 0.02, 0.02, 0.02, 0.08
+    ]
 
     // MARK: - Public API
 
@@ -67,27 +73,39 @@ actor DrawingAnalysisEngine {
         guard !strokes.isEmpty else {
             return ModalitySignal.make(
                 modality: .drawing, valence: 0, arousal: 0.3,
-                confidence: 0, uncertainty: 0.6
+                confidence: 0, uncertainty: 0.6,
+                emotionDistribution: .uniform
             )
         }
 
-        // Extract features
         let features = extractFeatures(strokes: strokes, drawing: drawing, canvasSize: canvasSize)
 
-        // Regression: output = tanh(W × features + b)
+        // Compute emotion distribution: softmax(W × features + b)
         let featureArray = features.asArray
-        let rawValence = dotProduct(W[0], featureArray) + bias[0]
-        let rawArousal = dotProduct(W[1], featureArray) + bias[1]
-        let valence = tanh(rawValence)
-        let arousal = max(0, min(1, sigmoid(rawArousal)))
+        var rawScores = Array(repeating: 0.0, count: 12)
+
+        for (fIdx, fVal) in featureArray.enumerated() {
+            for eIdx in 0..<12 {
+                rawScores[eIdx] += emotionMatrix[fIdx][eIdx] * fVal
+            }
+        }
+        for eIdx in 0..<12 {
+            rawScores[eIdx] += bias[eIdx]
+        }
+
+        // Softmax
+        let maxScore = rawScores.max() ?? 0
+        let expScores = rawScores.map { exp($0 - maxScore) }
+        let sumExp = expScores.reduce(0, +)
+        let probs = expScores.map { $0 / sumExp }
+
+        let dist = EmotionDistribution(probabilities: probs)
 
         // Confidence: sigmoid of stroke count × coverage
-        // Requires meaningful canvas usage for high confidence
         let strokeFactor = min(1.0, Double(strokes.count) / 15.0)
         let coverageFactor = features.coverage
-        let confidence = sigmoid((strokeFactor * coverageFactor) * 4 - 2) // sigmoid centered around 0.5
+        let confidence = sigmoid((strokeFactor * coverageFactor) * 4 - 2)
 
-        // Uncertainty: higher when fewer strokes or low coverage
         let uncertainty = max(0.15, 0.5 * (1 - confidence) + 0.1)
 
         // Feature labels for explainability
@@ -101,34 +119,48 @@ actor DrawingAnalysisEngine {
             humanLabels.append("light strokes")
             humanFeatures.append(features.meanPressure)
         }
+        if features.jaggedness > 0.5 {
+            humanLabels.append("jagged strokes")
+            humanFeatures.append(features.jaggedness)
+        }
+        if features.meanVelocity > 0.5 {
+            humanLabels.append("fast strokes")
+            humanFeatures.append(features.meanVelocity)
+        } else if features.meanVelocity < 0.15 {
+            humanLabels.append("slow, deliberate")
+            humanFeatures.append(features.meanVelocity)
+        }
         if features.coverage > 0.5 {
             humanLabels.append("expressive coverage")
             humanFeatures.append(features.coverage)
         }
+        if features.warmColorRatio > 0.6 {
+            humanLabels.append("warm colors")
+            humanFeatures.append(features.warmColorRatio)
+        } else if features.warmColorRatio < 0.2 {
+            humanLabels.append("cool/dark tones")
+            humanFeatures.append(features.warmColorRatio)
+        }
         if features.colorVariance > 0.3 {
             humanLabels.append("colorful palette")
             humanFeatures.append(features.colorVariance)
-        } else if features.colorVariance < 0.05 {
-            humanLabels.append("monochrome strokes")
-            humanFeatures.append(features.colorVariance)
-        }
-        if features.meanVelocity > 0.6 {
-            humanLabels.append("energetic strokes")
-            humanFeatures.append(features.meanVelocity)
         }
 
         return ModalitySignal.make(
             modality: .drawing,
-            valence: valence,
-            arousal: arousal,
+            valence: dist.valence,
+            arousal: dist.arousal,
             confidence: confidence,
             uncertainty: uncertainty,
+            emotionDistribution: dist,
             featureVector: humanFeatures,
             featureLabels: humanLabels
         )
     }
 
     // MARK: - Feature Extraction
+
+    private var featureArray: [Double] { [] }
 
     private func extractFeatures(strokes: [PKStroke], drawing: PKDrawing, canvasSize: CGSize) -> DrawingFeatures {
 
@@ -137,7 +169,6 @@ actor DrawingAnalysisEngine {
         for stroke in strokes {
             let path = stroke.path
             for i in 0..<path.count {
-                // Apple Pencil force range 0–6.67; normalize to [0, 1]
                 pressures.append(min(1.0, Double(path[i].force) / 3.5))
             }
         }
@@ -156,7 +187,6 @@ actor DrawingAnalysisEngine {
             }
         }
         let (meanV, stdV) = meanAndStd(velocities)
-        // Normalize velocity: 500 pt/s = 0.5
         let normMeanV = min(1.0, meanV / 1000.0)
         let normStdV = min(1.0, stdV / 1000.0)
 
@@ -174,6 +204,12 @@ actor DrawingAnalysisEngine {
         // 6. Color variance (HSB hue)
         let colorVar = computeColorVariance(strokes: strokes)
 
+        // 7. Jaggedness: mean angular change between consecutive segments
+        let jagged = computeJaggedness(strokes: strokes)
+
+        // 8. Warm color ratio
+        let warmRatio = computeWarmColorRatio(strokes: strokes)
+
         return DrawingFeatures(
             meanPressure: meanP,
             pressureStdDev: stdP,
@@ -182,8 +218,63 @@ actor DrawingAnalysisEngine {
             strokeDensity: density,
             coverage: coverage,
             spatialEntropy: entropy,
-            colorVariance: colorVar
+            colorVariance: colorVar,
+            jaggedness: jagged,
+            warmColorRatio: warmRatio
         )
+    }
+
+    // MARK: - Jaggedness (angular change)
+
+    private func computeJaggedness(strokes: [PKStroke]) -> Double {
+        var totalAngleChange = 0.0
+        var segmentCount = 0
+
+        for stroke in strokes {
+            let path = stroke.path
+            guard path.count > 2 else { continue }
+
+            for i in 2..<path.count {
+                let dx1 = Double(path[i-1].location.x - path[i-2].location.x)
+                let dy1 = Double(path[i-1].location.y - path[i-2].location.y)
+                let dx2 = Double(path[i].location.x - path[i-1].location.x)
+                let dy2 = Double(path[i].location.y - path[i-1].location.y)
+
+                let angle1 = atan2(dy1, dx1)
+                let angle2 = atan2(dy2, dx2)
+                var diff = abs(angle2 - angle1)
+                if diff > .pi { diff = 2 * .pi - diff }
+
+                totalAngleChange += diff
+                segmentCount += 1
+            }
+        }
+
+        guard segmentCount > 0 else { return 0 }
+        let meanAngle = totalAngleChange / Double(segmentCount)
+        // Normalize: π/4 (45°) mean change = 0.5 jaggedness
+        return min(1.0, meanAngle / (.pi / 2))
+    }
+
+    // MARK: - Warm Color Ratio
+
+    private func computeWarmColorRatio(strokes: [PKStroke]) -> Double {
+        guard !strokes.isEmpty else { return 0.5 }
+        var warmCount = 0
+        var totalCount = 0
+
+        for stroke in strokes {
+            var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0
+            stroke.ink.color.getHue(&h, saturation: &s, brightness: &b, alpha: nil)
+            totalCount += 1
+
+            // Warm: red (0-0.1, 0.9-1.0), orange (0.05-0.15), yellow (0.1-0.2)
+            if h < 0.2 || h > 0.85 {
+                warmCount += 1
+            }
+        }
+
+        return totalCount > 0 ? Double(warmCount) / Double(totalCount) : 0.5
     }
 
     // MARK: - Spatial Entropy
@@ -221,14 +312,16 @@ actor DrawingAnalysisEngine {
         for stroke in strokes {
             var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0
             stroke.ink.color.getHue(&h, saturation: &s, brightness: &b, alpha: nil)
-            if s > 0.1 {  // only count chromatic strokes
+            if s > 0.1 {
                 hues.append(Double(h))
             }
         }
         if hues.count < 2 { return 0 }
         let (_, std) = meanAndStd(hues)
-        return min(1.0, std * 3.0)   // normalize: 0.33 std → 1.0
+        return min(1.0, std * 3.0)
     }
+
+    // MARK: - DrawingFeatures array accessor
 
     // MARK: - Math Helpers
 
@@ -240,11 +333,16 @@ actor DrawingAnalysisEngine {
         return (mean, sqrt(variance))
     }
 
-    private func dotProduct(_ a: [Double], _ b: [Double]) -> Double {
-        zip(a, b).map(*).reduce(0, +)
-    }
-
     private func sigmoid(_ x: Double) -> Double {
         1.0 / (1.0 + exp(-x))
+    }
+}
+
+// Extension to get features as array
+extension DrawingFeatures {
+    var asArray: [Double] {
+        [meanPressure, pressureStdDev, meanVelocity, velocityStdDev,
+         strokeDensity, coverage, spatialEntropy, colorVariance,
+         jaggedness, warmColorRatio]
     }
 }

@@ -2,10 +2,10 @@
 //  AnalysisPipeline.swift
 //  better-journal
 //
-//  Orchestrates the full 6-layer mood detection pipeline:
-//    Layer 1: Per-modality signal extraction → ModalitySignal
+//  Orchestrates the complete mood detection pipeline:
+//    Layer 1: Per-modality signal extraction → ModalitySignal + EmotionDistribution
 //    Layer 2: Temperature-scaled calibration
-//    Layer 3: Bayesian precision-weighted fusion
+//    Layer 3: Late Fusion (distribution merge + Bayesian VA fusion)
 //    Layer 4: Kalman temporal smoothing
 //    Layer 5: Personal baseline normalization
 //    Layer 6: (External) Personality trait derivation
@@ -25,7 +25,7 @@ actor AnalysisPipeline {
     private let drawingEngine = DrawingAnalysisEngine()
     private let fusionEngine: MoodFusionEngine
 
-    // MARK: - Persisted State (injected from JournalStore)
+    // MARK: - Persisted State
 
     private var kalmanState: KalmanState
     private var baseline: UserBaseline
@@ -46,8 +46,8 @@ actor AnalysisPipeline {
 
     // MARK: - Full Pipeline
 
-    /// Run the complete 6-layer pipeline for a journal entry.
-    /// Returns a calibrated, temporally smoothed, baseline-normalized MoodScore.
+    /// Run the complete pipeline for a journal entry.
+    /// Returns a MoodScore with full EmotionDistribution + dimensional values.
     func analyze(
         title: String,
         content: String,
@@ -81,15 +81,14 @@ actor AnalysisPipeline {
         }
         if let ds = drawingSignal { signals.append(ds) }
 
-        // ─── Layer 2 + 3: Calibration + Bayesian Fusion ───
-        // (CalibrationLayer is applied inside the fusion engine)
+        // ─── Layer 2 + 3: Calibration + Late Fusion ───
 
         let fused = await fusionEngine.fuse(signals: signals)
 
         // ─── Layer 4: Kalman Temporal Smoothing ───
 
         let now = Date()
-        var ks = kalmanState  // copy for mutation
+        var ks = kalmanState
         ks.step(
             observedValence: fused.valence,
             observedArousal: fused.arousal,
@@ -106,20 +105,20 @@ actor AnalysisPipeline {
 
         // ─── Layer 5: Personal Baseline Normalization ───
 
-        var bl = baseline  // copy for mutation
+        var bl = baseline
         bl.update(valence: smoothedValence, arousal: smoothedArousal)
         baseline = bl
         let zScore = baseline.zScore(valence: smoothedValence)
         let label = UserBaseline.label(forZScore: zScore)
 
-        // ─── Assemble CalibratedMoodScore ───
+        // ─── Assemble MoodScore ───
 
-        let sentiment = Sentiment.fromValenceArousal(
-            valence: smoothedValence,
-            arousal: smoothedArousal
-        )
+        let primarySentiment = fused.emotionDistribution.dominantEmotion
 
         return MoodScore(
+            emotionDistribution: fused.emotionDistribution,
+            topEmotions: fused.topEmotions,
+            userConfirmedEmotion: nil,
             valence: smoothedValence,
             arousal: smoothedArousal,
             valenceUncertainty: sqrt(kalmanState.valence.variance),
@@ -128,13 +127,13 @@ actor AnalysisPipeline {
             contributions: fused.contributions,
             baselineZScore: zScore,
             baselineLabel: label,
-            primarySentiment: sentiment.rawValue,
+            primarySentiment: primarySentiment.rawValue,
             timestamp: now,
             hadConflict: fused.hadConflict
         )
     }
 
-    // MARK: - State Accessors (for persistence)
+    // MARK: - State Accessors
 
     func getKalmanState() -> KalmanState { kalmanState }
     func getBaseline() -> UserBaseline { baseline }

@@ -2,10 +2,14 @@
 //  JournalStore.swift
 //  better-journal
 //
-//  Created by Dhanush Gowdhaman on 2/11/26.
-//
 //  Persists journal entries, mood engine state (Kalman / Baseline / Calibration),
 //  mood summaries, and personality profiles. All data stored locally via UserDefaults.
+//
+//  ARCHITECTURAL INVARIANTS:
+//    1. Mood lives in JournalEntry.moodScore — no separate sentiment path
+//    2. update() never clears mood — old values stay visible until re-analysis completes
+//    3. Only one analysis runs per entry at a time (analysisInFlight gate)
+//    4. refreshInsight/refreshProfiles are debounced (5s), not per-save
 //
 
 import Foundation
@@ -35,10 +39,18 @@ class JournalStore {
     private let moodProfiler = MoodProfiler()
     private let personalityProfiler = PersonalityProfiler()
 
+    // MARK: - Analysis Gating
+
+    /// Prevents duplicate analysis for the same entry
+    private var analysisInFlight: Set<UUID> = []
+
+    /// Debounced refresh tasks — cancelled and re-created on each trigger
+    private var insightTask: Task<Void, Never>?
+    private var profileTask: Task<Void, Never>?
+
     // MARK: - Init
 
     init() {
-        // Load persisted engine state
         let kalman = Self.loadCodable(KalmanState.self, key: "kalman_state") ?? .initial
         let baseline = Self.loadCodable(UserBaseline.self, key: "user_baseline") ?? UserBaseline()
         let calibration = Self.loadCodable(CalibrationLayer.self, key: "calibration_layer") ?? .initial
@@ -50,7 +62,7 @@ class JournalStore {
         )
 
         load()
-        refreshInsight()
+        scheduleRefreshInsight()
     }
 
     // MARK: - CRUD
@@ -76,9 +88,12 @@ class JournalStore {
                 DrawingStorageManager.shared.delete(id: oldDrawing)
             }
 
+            // ⚠️ KEY FIX: Keep old mood values intact — don't clear them.
+            // The old moodScore stays visible until new analysis completes.
             var updated = entry
-            updated.sentiment = nil
-            updated.moodScore = nil
+            updated.sentiment = entries[index].sentiment     // preserve
+            updated.moodScore = entries[index].moodScore     // preserve
+            updated.userEmotion = entries[index].userEmotion // preserve
             entries[index] = updated
             save()
             runFullAnalysis(for: entry.id)
@@ -96,9 +111,18 @@ class JournalStore {
         }
         entries.remove(atOffsets: offsets)
         save()
-        refreshInsight()
-        refreshProfiles()
+        scheduleRefreshInsight()
+        scheduleRefreshProfiles()
         BJHaptic.warning()
+    }
+
+    /// Human-in-the-loop: user confirms an emotion from the top candidates.
+    func confirmUserEmotion(for entryID: UUID, emotion: Sentiment) {
+        guard let index = entries.firstIndex(where: { $0.id == entryID }) else { return }
+        entries[index].userEmotion = emotion
+        entries[index].moodScore?.userConfirmedEmotion = emotion.rawValue
+        save()
+        BJHaptic.success()
     }
 
     // MARK: - Full Analysis Pipeline
@@ -110,15 +134,21 @@ class JournalStore {
                 || entry.drawingID != nil
         else { return }
 
-        Task {
+        // ⚠️ Gate: only one analysis per entry at a time
+        guard !analysisInFlight.contains(entryID) else { return }
+        analysisInFlight.insert(entryID)
+
+        Task.detached(priority: .userInitiated) { [weak self] in
+            guard let self else { return }
+
             // Load drawing if present
             var drawing: PKDrawing? = nil
             if let drawingID = entry.drawingID {
                 drawing = DrawingStorageManager.shared.loadDrawing(id: drawingID)
             }
 
-            // Run the 6-layer pipeline
-            let moodScore = await pipeline.analyze(
+            // Run the full pipeline (single analysis — no separate SentimentAnalyzer call)
+            let moodScore = await self.pipeline.analyze(
                 title: entry.title,
                 content: entry.content,
                 photoIDs: entry.collage?.photoIDs ?? [],
@@ -126,60 +156,80 @@ class JournalStore {
                 canvasSize: CGSize(width: 600, height: 400)
             )
 
-            // Also get text-only sentiment for backward compat display
-            let sentiment = await SentimentAnalyzer.analyze(title: entry.title, content: entry.content)
+            // Derive sentiment from the distribution (single source)
+            let sentiment = Sentiment(rawValue: moodScore.primarySentiment) ?? .neutral
 
-            // Persist engine state after each analysis
-            let kalman = await pipeline.getKalmanState()
-            let baseline = await pipeline.getBaseline()
-            let calibration = await pipeline.getCalibration()
+            // Persist engine state
+            let kalman = await self.pipeline.getKalmanState()
+            let baseline = await self.pipeline.getBaseline()
+            let calibration = await self.pipeline.getCalibration()
 
-            await MainActor.run {
-                if let index = entries.firstIndex(where: { $0.id == entryID }) {
-                    entries[index].moodScore = moodScore
-                    entries[index].sentiment = sentiment
-                    save()
-                    saveEngineState(kalman: kalman, baseline: baseline, calibration: calibration)
-                    refreshInsight()
-                    refreshProfiles()
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.analysisInFlight.remove(entryID)
+
+                if let index = self.entries.firstIndex(where: { $0.id == entryID }) {
+                    // Atomic write — both fields from the same analysis
+                    self.entries[index].moodScore = moodScore
+                    self.entries[index].sentiment = sentiment
+                    self.save()
+                    self.saveEngineState(kalman: kalman, baseline: baseline, calibration: calibration)
+                    self.scheduleRefreshInsight()
+                    self.scheduleRefreshProfiles()
                 }
             }
         }
     }
 
-    // MARK: - Insight Generation
+    // MARK: - Debounced Insight Generation
 
-    func refreshInsight() {
-        guard entries.count >= 5 else {
-            journalInsight = nil
-            return
-        }
-
-        Task {
-            guard let insight = await SentimentAnalyzer.generateInsight(from: Array(entries.prefix(5))) else { return }
-            await MainActor.run {
-                journalInsight = insight
-            }
+    private func scheduleRefreshInsight() {
+        insightTask?.cancel()
+        insightTask = Task {
+            // Wait 5 seconds before running (debounce rapid saves)
+            try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled else { return }
+            await performRefreshInsight()
         }
     }
 
-    // MARK: - Profiling
+    private func performRefreshInsight() async {
+        guard entries.count >= 5 else {
+            await MainActor.run { journalInsight = nil }
+            return
+        }
 
-    func refreshProfiles() {
-        Task {
-            let summaries = await moodProfiler.buildRecentSummaries(entries: entries, days: 30)
-            let profile = await personalityProfiler.updateProfile(
-                from: summaries,
-                entries: entries,
-                existing: personalityProfile
-            )
+        let recentEntries = Array(entries.prefix(5))
+        guard let insight = await SentimentAnalyzer.generateInsight(from: recentEntries) else { return }
+        await MainActor.run {
+            journalInsight = insight
+        }
+    }
 
-            await MainActor.run {
-                self.moodSummaries = summaries
-                self.personalityProfile = profile
-                saveSummaries()
-                saveProfile()
-            }
+    // MARK: - Debounced Profiling
+
+    private func scheduleRefreshProfiles() {
+        profileTask?.cancel()
+        profileTask = Task {
+            try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled else { return }
+            await performRefreshProfiles()
+        }
+    }
+
+    private func performRefreshProfiles() async {
+        let summaries = await moodProfiler.buildRecentSummaries(entries: entries, days: 30)
+        let profile = await personalityProfiler.updateProfile(
+            from: summaries,
+            entries: entries,
+            existing: personalityProfile
+        )
+
+        await MainActor.run {
+            self.moodSummaries = summaries
+            self.personalityProfile = profile
+            saveSummaries()
+            saveProfile()
         }
     }
 

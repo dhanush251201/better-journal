@@ -3,14 +3,12 @@
 //  better-journal
 //
 //  On-device image analysis using Vision framework.
-//  Outputs ModalitySignal with calibration-ready confidence.
+//  Outputs ModalitySignal with EmotionDistribution.
 //
-//  Key improvements over previous version:
-//  - Probability-weighted scene affect (no hardcoded dictionary)
-//  - Geometric smile detection from landmarks (not boolean)
-//  - HSB color histogram with Valdez-Mehrabian color-emotion model
-//  - Saliency-weighted color analysis
-//  - Proper uncertainty propagation
+//  Three sub-analyzers:
+//    1. Face Expression: VNDetectFaceLandmarks → smile/frown geometry → emotions
+//    2. Color Theory: HSB histogram + Valdez-Mehrabian model → emotions
+//    3. Scene Classification: VNClassifyImage → scene-to-emotion mapping
 //
 
 import Vision
@@ -22,45 +20,69 @@ actor ImageAnalysisEngine {
 
     enum AnalysisError: Error { case invalidImage }
 
-    // MARK: - Affective Scene Prior
+    // MARK: - Scene → Emotion Mapping
 
-    /// Published affective norms for scene categories.
-    /// Derived from OASIS (Open Affective Standardized Image Set) and
-    /// IAPS norms mapped to Vision classification labels.
-    /// Values: (valence [-1,1], arousal [0,1], norm_confidence [0,1])
-    private static let sceneAffect: [String: (v: Double, a: Double, c: Double)] = [
-        // Nature (positive, calm)
-        "beach": (0.65, 0.25, 0.8), "sunset": (0.6, 0.2, 0.85), "sunrise": (0.6, 0.25, 0.8),
-        "garden": (0.5, 0.2, 0.7), "flower": (0.55, 0.2, 0.75), "lake": (0.45, 0.15, 0.7),
-        "park": (0.4, 0.25, 0.65), "nature": (0.4, 0.2, 0.6), "forest": (0.35, 0.2, 0.65),
-        "mountain": (0.4, 0.3, 0.7), "sky": (0.3, 0.15, 0.5), "field": (0.35, 0.15, 0.55),
-        "river": (0.35, 0.2, 0.6), "ocean": (0.5, 0.3, 0.7), "waterfall": (0.5, 0.4, 0.7),
-        "snow": (0.2, 0.2, 0.5), "rainbow": (0.7, 0.35, 0.8),
-        // Social (positive, energetic)
-        "party": (0.6, 0.8, 0.7), "celebration": (0.65, 0.8, 0.75), "wedding": (0.7, 0.7, 0.8),
-        "concert": (0.5, 0.85, 0.65), "playground": (0.6, 0.7, 0.7),
-        "family": (0.6, 0.45, 0.7), "people": (0.2, 0.4, 0.4), "crowd": (0.1, 0.7, 0.45),
+    /// Maps scene labels to emotion distributions (expanded from OASIS norms)
+    private static let sceneEmotions: [String: [Sentiment: Double]] = [
+        // Nature (calm, happy)
+        "beach":     [.calm: 0.4, .happy: 0.35, .grateful: 0.15],
+        "sunset":    [.calm: 0.35, .grateful: 0.3, .reflective: 0.2],
+        "sunrise":   [.hopeful: 0.35, .calm: 0.3, .happy: 0.2],
+        "garden":    [.calm: 0.4, .happy: 0.25, .grateful: 0.2],
+        "flower":    [.happy: 0.35, .calm: 0.3, .grateful: 0.2],
+        "lake":      [.calm: 0.5, .reflective: 0.25],
+        "park":      [.calm: 0.35, .happy: 0.3],
+        "nature":    [.calm: 0.4, .happy: 0.2, .grateful: 0.15],
+        "forest":    [.calm: 0.4, .reflective: 0.25],
+        "mountain":  [.excited: 0.25, .calm: 0.3, .grateful: 0.2],
+        "sky":       [.calm: 0.35, .hopeful: 0.25, .reflective: 0.2],
+        "ocean":     [.calm: 0.35, .reflective: 0.25, .excited: 0.15],
+        "waterfall": [.excited: 0.3, .calm: 0.25, .happy: 0.2],
+        "rainbow":   [.happy: 0.4, .hopeful: 0.35, .excited: 0.15],
+        "snow":      [.calm: 0.35, .nostalgic: 0.2, .reflective: 0.2],
+
+        // Social (happy, excited)
+        "party":       [.excited: 0.45, .happy: 0.4],
+        "celebration": [.excited: 0.4, .happy: 0.4, .grateful: 0.1],
+        "wedding":     [.happy: 0.4, .grateful: 0.3, .excited: 0.2],
+        "concert":     [.excited: 0.5, .happy: 0.3],
+        "playground":  [.happy: 0.4, .excited: 0.3, .nostalgic: 0.15],
+        "family":      [.grateful: 0.3, .happy: 0.35, .nostalgic: 0.15],
+        "people":      [.neutral: 0.3, .happy: 0.2, .reflective: 0.15],
+
         // Sport
-        "sport": (0.35, 0.8, 0.55), "gym": (0.2, 0.7, 0.5), "running": (0.3, 0.8, 0.55),
+        "sport":   [.excited: 0.4, .happy: 0.25, .stressed: 0.1],
+        "gym":     [.stressed: 0.2, .excited: 0.25, .calm: 0.15],
+        "running": [.excited: 0.3, .calm: 0.2, .happy: 0.2],
+
         // Food
-        "food": (0.4, 0.35, 0.6), "restaurant": (0.35, 0.4, 0.55), "kitchen": (0.25, 0.3, 0.5),
-        "cake": (0.5, 0.4, 0.65), "coffee": (0.35, 0.3, 0.55),
+        "food":       [.happy: 0.3, .calm: 0.2, .grateful: 0.2],
+        "restaurant": [.happy: 0.3, .calm: 0.2, .excited: 0.15],
+        "cake":       [.happy: 0.4, .excited: 0.25, .grateful: 0.15],
+        "coffee":     [.calm: 0.35, .happy: 0.2, .reflective: 0.15],
+
         // Animals
-        "pet": (0.6, 0.35, 0.75), "dog": (0.6, 0.45, 0.8), "cat": (0.5, 0.25, 0.7),
-        "animal": (0.3, 0.3, 0.5),
+        "pet": [.happy: 0.4, .calm: 0.25, .grateful: 0.2],
+        "dog": [.happy: 0.45, .excited: 0.2, .grateful: 0.15],
+        "cat": [.calm: 0.35, .happy: 0.3, .grateful: 0.15],
+
         // Urban (neutral)
-        "city": (0.0, 0.55, 0.45), "urban": (0.0, 0.5, 0.4), "traffic": (-0.15, 0.6, 0.5),
-        "office": (-0.05, 0.35, 0.45), "building": (0.0, 0.25, 0.35),
-        "street": (0.0, 0.4, 0.35), "car": (0.0, 0.4, 0.35),
+        "city":     [.neutral: 0.3, .excited: 0.15, .stressed: 0.15],
+        "traffic":  [.stressed: 0.35, .frustrated: 0.3, .anxious: 0.15],
+        "office":   [.stressed: 0.25, .neutral: 0.3, .reflective: 0.15],
+        "building": [.neutral: 0.4, .reflective: 0.15],
+
         // Negative
-        "rain": (-0.15, 0.25, 0.55), "storm": (-0.3, 0.65, 0.65), "dark": (-0.2, 0.3, 0.5),
-        "hospital": (-0.35, 0.45, 0.6), "night": (-0.05, 0.15, 0.4),
-        "fire": (-0.2, 0.8, 0.6), "accident": (-0.6, 0.7, 0.7),
+        "rain":     [.sad: 0.3, .reflective: 0.25, .calm: 0.15],
+        "storm":    [.anxious: 0.35, .stressed: 0.25, .frustrated: 0.15],
+        "dark":     [.sad: 0.3, .anxious: 0.2, .reflective: 0.2],
+        "hospital": [.anxious: 0.3, .sad: 0.25, .stressed: 0.2],
+        "night":    [.calm: 0.25, .reflective: 0.25, .anxious: 0.15],
+        "fire":     [.frustrated: 0.3, .anxious: 0.3, .stressed: 0.2],
     ]
 
     // MARK: - Public API
 
-    /// Analyze a single image → ModalitySignal.
     func analyze(image: UIImage) async throws -> ModalitySignal {
         guard let cgImage = image.cgImage else { throw AnalysisError.invalidImage }
 
@@ -69,11 +91,9 @@ actor ImageAnalysisEngine {
         async let colorInfo = analyzeColor(cgImage)
 
         let (sceneResults, faceResults, colorResult) = try await (scenes, faces, colorInfo)
-
         return computeSignal(scenes: sceneResults, faces: faceResults, color: colorResult)
     }
 
-    /// Analyze multiple images → array of ModalitySignals.
     func analyze(images: [UIImage]) async -> [ModalitySignal] {
         await withTaskGroup(of: ModalitySignal?.self) { group in
             for image in images {
@@ -108,10 +128,11 @@ actor ImageAnalysisEngine {
         }
     }
 
-    // MARK: - Vision: Face Landmarks
+    // MARK: - Vision: Face Landmarks → Expression
 
     private struct FaceResult: Sendable {
-        let smileProbability: Double   // [0,1] geometric estimate
+        let smileProbability: Double   // [0, 1]
+        let frownProbability: Double   // [0, 1]
         let boundingBox: CGRect
     }
 
@@ -121,21 +142,31 @@ actor ImageAnalysisEngine {
                 if let error { cont.resume(throwing: error); return }
                 let faces = (request.results as? [VNFaceObservation]) ?? []
                 let results = faces.compactMap { face -> FaceResult? in
-                    // Geometric smile estimation from lip landmarks
                     guard let outerLips = face.landmarks?.outerLips,
                           outerLips.pointCount >= 6 else {
-                        return FaceResult(smileProbability: 0.3, boundingBox: face.boundingBox)
+                        return FaceResult(smileProbability: 0.3, frownProbability: 0.2,
+                                         boundingBox: face.boundingBox)
                     }
-                    // Smile = width/height ratio of outer lips
+
                     let points = outerLips.normalizedPoints
                     let xs = points.map(\.x)
                     let ys = points.map(\.y)
                     let lipWidth = (xs.max() ?? 0) - (xs.min() ?? 0)
                     let lipHeight = max(0.001, (ys.max() ?? 0) - (ys.min() ?? 0))
                     let aspectRatio = lipWidth / lipHeight
-                    // Smiling lips have aspect ratio > 3.0. Neutral ~2.0. Frown < 1.5.
+
+                    // Smiling: aspect ratio > 3.0. Neutral ~2.0. Frown < 1.5
                     let smileProb = min(1.0, max(0, (aspectRatio - 1.5) / 3.0))
-                    return FaceResult(smileProbability: smileProb, boundingBox: face.boundingBox)
+
+                    // Also check corners: if mouth corners are lower than center → frown
+                    let leftCorner = points.first?.y ?? 0
+                    let rightCorner = points.last?.y ?? 0
+                    let centerY = ys.reduce(0, +) / CGFloat(ys.count)
+                    let cornerDrop = centerY - min(leftCorner, rightCorner)
+                    let frownProb = min(1.0, max(0, Double(cornerDrop) * 3.0))
+
+                    return FaceResult(smileProbability: smileProb, frownProbability: frownProb,
+                                     boundingBox: face.boundingBox)
                 }
                 cont.resume(returning: results)
             }
@@ -145,14 +176,13 @@ actor ImageAnalysisEngine {
         }
     }
 
-    // MARK: - Color Analysis (HSB histogram + Valdez-Mehrabian)
+    // MARK: - Color Analysis → Emotion Distribution
 
     private struct ColorResult: Sendable {
-        let hueHistogram: [Double]     // 12 bins (30° each)
+        let hueHistogram: [Double]
         let meanSaturation: Double
         let meanBrightness: Double
-        let valenceContribution: Double
-        let arousalContribution: Double
+        let emotionDist: EmotionDistribution
     }
 
     private func analyzeColor(_ image: CGImage) async -> ColorResult {
@@ -169,7 +199,7 @@ actor ImageAnalysisEngine {
         ) else {
             return ColorResult(hueHistogram: Array(repeating: 1.0/12, count: 12),
                              meanSaturation: 0.5, meanBrightness: 0.5,
-                             valenceContribution: 0, arousalContribution: 0.3)
+                             emotionDist: .uniform)
         }
 
         context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
@@ -194,27 +224,63 @@ actor ImageAnalysisEngine {
         }
 
         let n = Double(count)
-        hueHist = hueHist.map { $0 / n }    // normalize to probabilities
+        hueHist = hueHist.map { $0 / n }
         let meanSat = satSum / n
         let meanBri = briSum / n
 
-        // Valdez & Mehrabian (1994) color-emotion model:
-        // Pleasure = 0.69×Brightness + 0.22×Saturation - 0.16 (if warm hue)
-        // Arousal  = -0.31×Brightness + 0.60×Saturation
-        // Adapted: warm hue ratio shifts valence positively
+        // Map color characteristics to emotions using Valdez-Mehrabian
+        var emotionProbs: [Sentiment: Double] = [:]
+
+        // Warm, bright, saturated → happy, excited
         let warmBins = hueHist[0] + hueHist[1] + hueHist[11]  // red/orange/magenta
         let coolBins = hueHist[5] + hueHist[6] + hueHist[7]   // cyan/blue/purple
-        let warmBias = (warmBins - coolBins) * 0.2
+        let greenBins = hueHist[3] + hueHist[4]                // green/teal
 
-        let valenceC = 0.69 * meanBri + 0.22 * meanSat - 0.31 + warmBias
-        let arousalC = -0.31 * meanBri + 0.60 * meanSat + 0.15
+        if meanBri > 0.6 && meanSat > 0.4 {
+            // Bright & saturated → positive
+            emotionProbs[.happy] = (emotionProbs[.happy] ?? 0) + 0.3
+            emotionProbs[.excited] = (emotionProbs[.excited] ?? 0) + 0.2
+        }
+        if meanBri < 0.3 {
+            // Dark → sad, reflective
+            emotionProbs[.sad] = (emotionProbs[.sad] ?? 0) + 0.3
+            emotionProbs[.reflective] = (emotionProbs[.reflective] ?? 0) + 0.2
+        }
+        if warmBins > 0.3 {
+            // Warm colors → happy, excited
+            emotionProbs[.happy] = (emotionProbs[.happy] ?? 0) + warmBins * 0.4
+            emotionProbs[.excited] = (emotionProbs[.excited] ?? 0) + warmBins * 0.2
+        }
+        if coolBins > 0.3 {
+            // Cool colors → calm, sad
+            emotionProbs[.calm] = (emotionProbs[.calm] ?? 0) + coolBins * 0.35
+            emotionProbs[.sad] = (emotionProbs[.sad] ?? 0) + coolBins * 0.15
+        }
+        if greenBins > 0.2 {
+            // Green → calm, hopeful
+            emotionProbs[.calm] = (emotionProbs[.calm] ?? 0) + greenBins * 0.3
+            emotionProbs[.hopeful] = (emotionProbs[.hopeful] ?? 0) + greenBins * 0.2
+        }
+        if meanSat < 0.15 {
+            // Desaturated → neutral, reflective, sad
+            emotionProbs[.neutral] = (emotionProbs[.neutral] ?? 0) + 0.25
+            emotionProbs[.reflective] = (emotionProbs[.reflective] ?? 0) + 0.15
+            emotionProbs[.sad] = (emotionProbs[.sad] ?? 0) + 0.1
+        }
+
+        // High contrast (bright + dark) → stressed, anxious
+        if meanBri > 0.4 && meanSat > 0.5 && (hueHist[0] > 0.2) {
+            emotionProbs[.stressed] = (emotionProbs[.stressed] ?? 0) + 0.2
+            emotionProbs[.frustrated] = (emotionProbs[.frustrated] ?? 0) + 0.15
+        }
+
+        let colorDist = EmotionDistribution.from(emotionProbs)
 
         return ColorResult(
             hueHistogram: hueHist,
             meanSaturation: meanSat,
             meanBrightness: meanBri,
-            valenceContribution: max(-1, min(1, valenceC)),
-            arousalContribution: max(0, min(1, arousalC))
+            emotionDist: colorDist
         )
     }
 
@@ -226,84 +292,95 @@ actor ImageAnalysisEngine {
         color: ColorResult
     ) -> ModalitySignal {
 
-        // --- Scene affect (probability-weighted) ---
-        var sceneValence = 0.0, sceneArousal = 0.0, sceneWeight = 0.0
-        var matchedLabels: [String] = []
+        // ─── 1. Scene → EmotionDistribution ───
+        var sceneDist = EmotionDistribution.uniform
+        var matchedAny = false
 
         for (label, prob) in scenes {
             let words = label.lowercased().split(separator: "_").map(String.init)
             for word in words {
-                if let affect = Self.sceneAffect[word] {
-                    let w = Double(prob) * affect.c   // weight = probability × norm confidence
-                    sceneValence += affect.v * w
-                    sceneArousal += affect.a * w
-                    sceneWeight += w
-                    matchedLabels.append(word)
+                if let emotionMap = Self.sceneEmotions[word] {
+                    matchedAny = true
+                    let scaled = emotionMap.mapValues { $0 * Double(prob) }
+                    let wordDist = EmotionDistribution.from(scaled)
+                    sceneDist = sceneDist.merged(with: wordDist, weight: Double(prob))
                 }
             }
         }
-        if sceneWeight > 0 {
-            sceneValence /= sceneWeight
-            sceneArousal /= sceneWeight
+
+        // ─── 2. Face → EmotionDistribution ───
+        var faceDist = EmotionDistribution.uniform
+        let hasFaces = !faces.isEmpty
+
+        if hasFaces {
+            let avgSmile = faces.map(\.smileProbability).reduce(0, +) / Double(faces.count)
+            let avgFrown = faces.map(\.frownProbability).reduce(0, +) / Double(faces.count)
+
+            var faceEmotions: [Sentiment: Double] = [:]
+            if avgSmile > 0.5 {
+                faceEmotions[.happy] = avgSmile * 0.5
+                faceEmotions[.excited] = avgSmile * 0.2
+                faceEmotions[.grateful] = avgSmile * 0.1
+            } else if avgFrown > 0.3 {
+                faceEmotions[.sad] = avgFrown * 0.4
+                faceEmotions[.frustrated] = avgFrown * 0.2
+                faceEmotions[.anxious] = avgFrown * 0.1
+            } else {
+                faceEmotions[.neutral] = 0.3
+                faceEmotions[.calm] = 0.2
+                faceEmotions[.reflective] = 0.15
+            }
+            faceDist = EmotionDistribution.from(faceEmotions)
         }
 
-        // --- Face affect ---
-        let smileProbs = faces.map(\.smileProbability)
-        let avgSmile = smileProbs.isEmpty ? 0.3 : smileProbs.reduce(0, +) / Double(smileProbs.count)
-        let faceValence = (avgSmile - 0.3) * 1.5   // normalize: 0.3 = neutral
-        let faceWeight = faces.isEmpty ? 0.0 : 0.35
+        // ─── 3. Merge: scene + face + color ───
+        // Weights: face = 0.4, scene = 0.35, color = 0.25
+        var finalDist = faceDist
+        if matchedAny {
+            finalDist = finalDist.merged(with: sceneDist, weight: 0.85)
+        }
+        finalDist = finalDist.merged(with: color.emotionDist, weight: 0.6)
 
-        // --- Color affect ---
-        let colorWeight = 0.25
-
-        // --- Weighted combination (scene + face + color) ---
-        let totalW = max(0.01, sceneWeight + faceWeight + colorWeight)
-        let finalValence = (sceneValence * sceneWeight
-                           + faceValence * faceWeight
-                           + color.valenceContribution * colorWeight) / totalW
-        let finalArousal = (sceneArousal * sceneWeight
-                           + Double(avgSmile > 0.5 ? 0.15 : 0) * faceWeight
-                           + color.arousalContribution * colorWeight) / totalW
-
-        // --- Confidence ---
-        // Based on: best scene probability, face presence, color signal strength
+        // ─── 4. Confidence ───
         let topSceneProb = scenes.first.map { Double($0.prob) } ?? 0
-        let faceContrib = faces.isEmpty ? 0.0 : 0.2
-        let sceneContrib = min(0.5, topSceneProb)
-        let confidence = min(0.85, sceneContrib + faceContrib + 0.1)
+        let faceContrib = hasFaces ? 0.25 : 0.0
+        let sceneContrib = matchedAny ? min(0.4, topSceneProb) : 0.0
+        let colorContrib = 0.15
+        let confidence = min(0.85, faceContrib + sceneContrib + colorContrib)
+        let adjustedConfidence = !matchedAny && !hasFaces ? 0.08 : confidence
 
-        // If nothing matched any affective prior, confidence is very low
-        let adjustedConfidence = matchedLabels.isEmpty && faces.isEmpty ? 0.05 : confidence
+        let uncertainty = max(0.15, 0.65 - adjustedConfidence * 0.5)
 
-        // --- Uncertainty ---
-        // Higher when fewer scene matches, no faces
-        let uncertainty = max(0.15, 0.7 - adjustedConfidence * 0.5)
-
-        // --- Feature labels ---
+        // ─── 5. Feature labels ───
         var labels: [String] = []
         var features: [Double] = []
-        if !matchedLabels.isEmpty {
-            labels.append(contentsOf: matchedLabels.prefix(3).map { "\($0) scene" })
-            features.append(contentsOf: Array(repeating: sceneValence, count: min(3, matchedLabels.count)))
+
+        let topEmotions = finalDist.topK(2)
+        for e in topEmotions {
+            labels.append(e.emotion.displayName.lowercased())
+            features.append(e.probability)
         }
-        if !faces.isEmpty {
+
+        if hasFaces {
+            let avgSmile = faces.map(\.smileProbability).reduce(0, +) / Double(faces.count)
             labels.append(avgSmile > 0.5 ? "smiling faces" : "neutral faces")
-            features.append(faceValence)
+            features.append(avgSmile)
         }
         if color.meanBrightness > 0.6 {
             labels.append("bright tones")
-            features.append(color.valenceContribution)
+            features.append(color.meanBrightness)
         } else if color.meanBrightness < 0.3 {
             labels.append("dark tones")
-            features.append(color.valenceContribution)
+            features.append(color.meanBrightness)
         }
 
         return ModalitySignal.make(
             modality: .image,
-            valence: max(-1, min(1, finalValence)),
-            arousal: max(0, min(1, finalArousal)),
+            valence: finalDist.valence,
+            arousal: finalDist.arousal,
             confidence: adjustedConfidence,
             uncertainty: uncertainty,
+            emotionDistribution: finalDist,
             featureVector: features,
             featureLabels: labels
         )
