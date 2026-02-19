@@ -303,6 +303,7 @@ struct EntryRowView: View {
     let entry: JournalEntry
     let store: JournalStore
     @State private var appeared = false
+    @State private var showMoodPicker = false
 
     private var formattedDate: String {
         entry.date.formatted(date: .abbreviated, time: .omitted)
@@ -349,8 +350,8 @@ struct EntryRowView: View {
                 HStack(spacing: 8) {
                     if let emotion = entry.resolvedEmotion {
                         SentimentTagView(sentiment: emotion) {
-                            // On tap → allow user to change mood
-                            store.confirmUserEmotion(for: entry.id, emotion: emotion)
+                            // On tap → open mood picker to change mood
+                            showMoodPicker = true
                         }
                         .transition(.scale.combined(with: .opacity))
                     }
@@ -404,6 +405,53 @@ struct EntryRowView: View {
                 appeared = true
             }
         }
+        .sheet(isPresented: $showMoodPicker) {
+            moodPickerSheet
+        }
+    }
+
+    // MARK: - Mood Picker Sheet
+
+    private var moodPickerSheet: some View {
+        VStack(spacing: 20) {
+            VStack(spacing: 8) {
+                CanonicalMoodView(sentiment: entry.resolvedEmotion, size: 60)
+
+                Text("Change Mood")
+                    .font(.system(.title3, design: .rounded, weight: .semibold))
+                    .foregroundStyle(BJDesign.Palette.grayBlue)
+                Text("Tap the mood that best describes this entry.")
+                    .font(.system(.subheadline, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.top, 24)
+
+            FlowLayout(spacing: 8) {
+                ForEach(Sentiment.allCases, id: \.self) { sentiment in
+                    SentimentTagView(sentiment: sentiment) {
+                        store.confirmUserEmotion(for: entry.id, emotion: sentiment)
+                        showMoodPicker = false
+                        BJHaptic.success()
+                    }
+                }
+            }
+            .padding(.horizontal)
+
+            Button {
+                showMoodPicker = false
+            } label: {
+                Text("Cancel")
+                    .font(.system(.subheadline, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.bottom)
+
+            Spacer()
+        }
+        .background(BJDesign.Palette.cream)
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
     }
 
     // MARK: - Mood Halo Background

@@ -346,7 +346,7 @@ struct EntryEditorView: View {
                 ForEach(emotionCandidates, id: \.emotion) { candidate in
                     if let sentiment = Sentiment(rawValue: candidate.emotion) {
                         Button {
-                            if let entryID = savedEntryID {
+                            if let entryID = existingEntry?.id ?? savedEntryID {
                                 store.confirmUserEmotion(for: entryID, emotion: sentiment)
                             }
                             showEmotionPicker = false
@@ -398,7 +398,7 @@ struct EntryEditorView: View {
                 FlowLayout(spacing: 8) {
                     ForEach(Sentiment.allCases, id: \.self) { sentiment in
                         SentimentTagView(sentiment: sentiment) {
-                            if let entryID = savedEntryID {
+                            if let entryID = existingEntry?.id ?? savedEntryID {
                                 store.confirmUserEmotion(for: entryID, emotion: sentiment)
                             }
                             showEmotionPicker = false
