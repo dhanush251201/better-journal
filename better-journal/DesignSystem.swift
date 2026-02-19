@@ -146,3 +146,105 @@ enum BJHaptic {
         }
     }
 }
+
+// MARK: - Insight Color Palette (Premium, Never Harsh)
+
+enum InsightPalette {
+    // Joy: warm gold → cream
+    static let joyGold     = Color(hex: "FFD700")
+    static let joyCream    = Color(hex: "FFF3CD")
+
+    // Calm: soft sky → mist
+    static let calmSky     = Color(hex: "A8D8EA")
+    static let calmMist    = Color(hex: "E8F4FD")
+
+    // Anxiety: muted amber → peach
+    static let anxietyAmber = Color(hex: "FFAB40")
+    static let anxietyPeach = Color(hex: "FFE0B2")
+
+    // Frustration: deep coral → rose
+    static let coralDeep   = Color(hex: "FF6B6B")
+    static let coralRose   = Color(hex: "FFE3E3")
+
+    // Sadness: slate blue → cloud
+    static let slateBlue   = Color(hex: "78909C")
+    static let slateCloud  = Color(hex: "CFD8DC")
+
+    // Reflective: lavender → lilac
+    static let lavender    = Color(hex: "B39DDB")
+    static let lilac       = Color(hex: "EDE7F6")
+
+    // Neutral: warm gray
+    static let neutralGray = Color(hex: "E0E0E0")
+    static let neutralMist = Color(hex: "F5F5F5")
+
+    /// Map a mood category string to its premium color.
+    static func color(for mood: String) -> Color {
+        switch mood {
+        case "happy", "excited", "grateful":  return joyGold
+        case "calm", "hopeful":               return calmSky
+        case "anxious", "stressed":           return anxietyAmber
+        case "frustrated":                    return coralDeep
+        case "sad":                           return slateBlue
+        case "reflective", "nostalgic":       return lavender
+        default:                              return neutralGray
+        }
+    }
+
+    /// Soft gradient pair for a mood.
+    static func gradient(for mood: String) -> [Color] {
+        switch mood {
+        case "happy", "excited", "grateful":  return [joyGold, joyCream]
+        case "calm", "hopeful":               return [calmSky, calmMist]
+        case "anxious", "stressed":           return [anxietyAmber, anxietyPeach]
+        case "frustrated":                    return [coralDeep, coralRose]
+        case "sad":                           return [slateBlue, slateCloud]
+        case "reflective", "nostalgic":       return [lavender, lilac]
+        default:                              return [neutralGray, neutralMist]
+        }
+    }
+}
+
+// MARK: - Insight Design Tokens
+
+enum InsightDesign {
+    static let cardRadius: CGFloat = 24
+    static let largeCardRadius: CGFloat = 32
+    static let cardPadding: CGFloat = 24
+    static let sectionSpacing: CGFloat = 28
+}
+
+enum InsightAnimation {
+    static let gentle = Animation.easeInOut(duration: 0.5)
+    static let slow = Animation.easeInOut(duration: 0.6)
+    static let cardEntrance = Animation.spring(response: 0.6, dampingFraction: 0.82)
+    static let staggerDelay: Double = 0.08
+}
+
+// MARK: - Glass Card Modifier
+
+struct BJGlassCardStyle: ViewModifier {
+    var radius: CGFloat = InsightDesign.cardRadius
+
+    func body(content: Content) -> some View {
+        content
+            .background(
+                .ultraThinMaterial,
+                in: RoundedRectangle(cornerRadius: radius, style: .continuous)
+            )
+            .shadow(
+                color: Color.black.opacity(0.05),
+                radius: 16, y: 6
+            )
+            .shadow(
+                color: Color.black.opacity(0.02),
+                radius: 4, y: 2
+            )
+    }
+}
+
+extension View {
+    func bjGlassCard(radius: CGFloat = InsightDesign.cardRadius) -> some View {
+        modifier(BJGlassCardStyle(radius: radius))
+    }
+}

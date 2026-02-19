@@ -15,6 +15,7 @@
 import Foundation
 import Observation
 import PencilKit
+import SwiftData
 import SwiftUI
 
 @Observable
@@ -37,6 +38,7 @@ class JournalStore {
 
     private var pipeline: AnalysisPipeline
     private let moodProfiler = MoodProfiler()
+    private var analyticsStore: MoodAnalyticsStore?
     private let personalityProfiler = PersonalityProfiler()
 
     // MARK: - Analysis Gating
@@ -50,7 +52,7 @@ class JournalStore {
 
     // MARK: - Init
 
-    init() {
+    init(modelContainer: ModelContainer? = nil) {
         let kalman = Self.loadCodable(KalmanState.self, key: "kalman_state") ?? .initial
         let baseline = Self.loadCodable(UserBaseline.self, key: "user_baseline") ?? UserBaseline()
         let calibration = Self.loadCodable(CalibrationLayer.self, key: "calibration_layer") ?? .initial
@@ -60,6 +62,10 @@ class JournalStore {
             baseline: baseline,
             calibration: calibration
         )
+
+        if let container = modelContainer {
+            self.analyticsStore = MoodAnalyticsStore(modelContainer: container)
+        }
 
         load()
         scheduleRefreshInsight()
@@ -102,11 +108,16 @@ class JournalStore {
 
     func delete(at offsets: IndexSet) {
         for index in offsets {
+            let entryID = entries[index].id
             if let photoIDs = entries[index].collage?.photoIDs {
                 PhotoStorageManager.shared.deleteImages(ids: photoIDs)
             }
             if let drawingID = entries[index].drawingID {
                 DrawingStorageManager.shared.delete(id: drawingID)
+            }
+            // Clean up analytics record
+            Task { [weak self] in
+                try? await self?.analyticsStore?.deleteRecord(noteID: entryID)
             }
         }
         entries.remove(atOffsets: offsets)
@@ -176,6 +187,14 @@ class JournalStore {
                     self.saveEngineState(kalman: kalman, baseline: baseline, calibration: calibration)
                     self.scheduleRefreshInsight()
                     self.scheduleRefreshProfiles()
+
+                    // Persist to siloed analytics store (fire-and-forget)
+                    let savedEntry = self.entries[index]
+                    Task { [weak self] in
+                        try? await self?.analyticsStore?.recordMood(
+                            from: savedEntry, moodScore: moodScore
+                        )
+                    }
                 }
             }
         }

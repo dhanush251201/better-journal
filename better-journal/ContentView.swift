@@ -5,6 +5,7 @@
 //  Created by Dhanush Gowdhaman on 2/11/26.
 //
 
+import SwiftData
 import SwiftUI
 
 // MARK: - Motivational Messages
@@ -32,10 +33,16 @@ private let motivationalMessages: [String] = [
 // MARK: - Content View
 
 struct ContentView: View {
-    @State private var store = JournalStore()
+    @State private var store: JournalStore
     @State private var showingNewEntry = false
-    @State private var showingWeeklyInsight = false
+    @State private var showingInsights = false
     @State private var appeared = false
+    private let modelContainer: ModelContainer?
+
+    init(modelContainer: ModelContainer? = nil) {
+        self.modelContainer = modelContainer
+        _store = State(initialValue: JournalStore(modelContainer: modelContainer))
+    }
 
     var body: some View {
         NavigationStack {
@@ -59,16 +66,14 @@ struct ContentView: View {
             .navigationTitle("Journal")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    if !store.moodSummaries.isEmpty {
-                        Button {
-                            showingWeeklyInsight = true
-                            BJHaptic.soft()
-                        } label: {
-                            Image(systemName: "chart.line.uptrend.xyaxis.circle.fill")
-                                .font(.title3)
-                                .symbolRenderingMode(.hierarchical)
-                                .foregroundStyle(.purple)
-                        }
+                    Button {
+                        showingInsights = true
+                        BJHaptic.soft()
+                    } label: {
+                        Image(systemName: "chart.line.uptrend.xyaxis.circle.fill")
+                            .font(.title3)
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(.purple)
                     }
                 }
                 ToolbarItem(placement: .primaryAction) {
@@ -83,18 +88,29 @@ struct ContentView: View {
             .sheet(isPresented: $showingNewEntry) {
                 EntryEditorView(store: store)
             }
-            .sheet(isPresented: $showingWeeklyInsight) {
+            .sheet(isPresented: $showingInsights) {
                 NavigationStack {
-                    WeeklyInsightView(
-                        summaries: store.moodSummaries,
-                        insight: store.journalInsight,
-                        profile: store.personalityProfile
-                    )
-                    .navigationTitle("Insights")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Done") { showingWeeklyInsight = false }
+                    if let container = modelContainer {
+                        InsightsTabView(modelContainer: container, store: store)
+                            .navigationTitle("Insights")
+                            .navigationBarTitleDisplayMode(.inline)
+                            .toolbar {
+                                ToolbarItem(placement: .cancellationAction) {
+                                    Button("Done") { showingInsights = false }
+                                }
+                            }
+                    } else {
+                        WeeklyInsightView(
+                            summaries: store.moodSummaries,
+                            insight: store.journalInsight,
+                            profile: store.personalityProfile
+                        )
+                        .navigationTitle("Insights")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button("Done") { showingInsights = false }
+                            }
                         }
                     }
                 }
