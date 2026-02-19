@@ -279,7 +279,11 @@ struct SentimentAnalyzer {
             dist = taggerDist
         }
 
-        // ─── Step 4: Compute signal metadata ───
+        // ─── Step 4: User feedback bias ───
+
+        dist = MoodFeedbackStore.shared.biasDistribution(dist, forText: text)
+
+        // ─── Step 5: Compute signal metadata ───
 
         let valence = dist.valence
         let arousal = dist.arousal

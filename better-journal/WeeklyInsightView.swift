@@ -27,13 +27,13 @@ struct WeeklyInsightView: View {
                 }
                 .padding(.top, BJDesign.Spacing.xl)
 
-                // Mood Ring
+                // Mood Character
                 if !summaries.isEmpty {
-                    MoodRingView(
-                        averageValence: weekAverageValence,
-                        averageArousal: weekAverageArousal
+                    CanonicalMoodView(
+                        valence: weekAverageValence,
+                        arousal: weekAverageArousal,
+                        size: 140
                     )
-                    .frame(width: 180, height: 180)
                     .scaleEffect(appeared ? 1.0 : 0.8)
                     .opacity(appeared ? 1.0 : 0)
                     .animation(BJAnimation.springGentle, value: appeared)

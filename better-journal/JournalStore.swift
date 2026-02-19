@@ -132,6 +132,11 @@ class JournalStore {
         guard let index = entries.firstIndex(where: { $0.id == entryID }) else { return }
         entries[index].userEmotion = emotion
         entries[index].moodScore?.userConfirmedEmotion = emotion.rawValue
+
+        // Record feedback for future prediction bias
+        let text = entries[index].title + " " + entries[index].content
+        MoodFeedbackStore.shared.recordCorrection(text: text, correctedMood: emotion)
+
         save()
         BJHaptic.success()
     }

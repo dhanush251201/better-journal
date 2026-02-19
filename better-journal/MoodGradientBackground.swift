@@ -54,7 +54,7 @@ struct MoodGradientBackground: View {
 
     private var gradientColors: [Color] {
         guard let emotion else {
-            return [BJDesign.MoodColor.warmGray, BJDesign.MoodColor.nearWhite]
+            return [BJDesign.MoodColor.warmGray, BJDesign.Palette.cream]
         }
 
         let isHighArousal = arousal > 0.6
@@ -64,72 +64,72 @@ struct MoodGradientBackground: View {
             return [
                 BJDesign.MoodColor.sunsetGold.opacity(isHighArousal ? 0.55 : 0.4),
                 BJDesign.MoodColor.warmGlow.opacity(0.35),
-                BJDesign.MoodColor.nearWhite
+                BJDesign.Palette.cream
             ]
         case .excited:
             return [
                 Color.orange.opacity(0.5),
                 BJDesign.MoodColor.sunsetGold.opacity(0.3),
-                BJDesign.MoodColor.nearWhite
+                BJDesign.Palette.cream
             ]
         case .grateful:
             return [
                 Color.pink.opacity(0.4),
                 BJDesign.MoodColor.softCream.opacity(0.35),
-                BJDesign.MoodColor.nearWhite
+                BJDesign.Palette.cream
             ]
         case .calm:
             return [
                 Color.mint.opacity(0.4),
                 BJDesign.MoodColor.mist.opacity(0.3),
-                BJDesign.MoodColor.nearWhite
+                BJDesign.Palette.cream
             ]
         case .hopeful:
             return [
                 Color.cyan.opacity(0.4),
                 BJDesign.MoodColor.softCream.opacity(0.3),
-                BJDesign.MoodColor.nearWhite
+                BJDesign.Palette.cream
             ]
         case .reflective:
             return [
                 Color.indigo.opacity(0.35),
                 BJDesign.MoodColor.mist.opacity(0.25),
-                BJDesign.MoodColor.nearWhite
+                BJDesign.Palette.cream
             ]
         case .nostalgic:
             return [
                 Color.brown.opacity(0.35),
                 BJDesign.MoodColor.softCream.opacity(0.3),
-                BJDesign.MoodColor.nearWhite
+                BJDesign.Palette.cream
             ]
         case .anxious:
             return [
                 Color.yellow.opacity(0.45),
                 Color.orange.opacity(0.2),
-                BJDesign.MoodColor.nearWhite
+                BJDesign.Palette.cream
             ]
         case .sad:
             return [
                 Color.blue.opacity(0.4),
                 BJDesign.MoodColor.stormGray.opacity(0.3),
-                BJDesign.MoodColor.nearWhite
+                BJDesign.Palette.cream
             ]
         case .frustrated:
             return [
                 BJDesign.MoodColor.rose.opacity(0.45),
                 Color.red.opacity(0.2),
-                BJDesign.MoodColor.nearWhite
+                BJDesign.Palette.cream
             ]
         case .stressed:
             return [
                 Color.red.opacity(0.4),
                 BJDesign.MoodColor.stormGray.opacity(0.25),
-                BJDesign.MoodColor.nearWhite
+                BJDesign.Palette.cream
             ]
         case .neutral:
             return [
                 BJDesign.MoodColor.warmGray.opacity(0.5),
-                BJDesign.MoodColor.nearWhite
+                BJDesign.Palette.cream
             ]
         }
     }

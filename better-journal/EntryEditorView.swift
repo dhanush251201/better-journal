@@ -83,7 +83,10 @@ struct EntryEditorView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                // Mood-reactive background — emotion-based, same algorithm everywhere
+                // Warm cream base
+                BJDesign.Palette.cream.ignoresSafeArea()
+
+                // Mood-reactive gradient background
                 if hasMoodEstimate, let live = liveEmotion {
                     MoodGradientBackground(emotion: live, arousal: liveArousal)
                 } else {
@@ -93,25 +96,28 @@ struct EntryEditorView: View {
                 VStack(spacing: 0) {
                     // Scrollable content area
                     ScrollView {
-                        VStack(spacing: BJDesign.Spacing.md) {
+                        VStack(alignment: .leading, spacing: BJDesign.Spacing.lg) {
                             // Title
                             TextField("Title", text: $title)
-                                .font(.title2.weight(.semibold))
+                                .font(.system(.title2, design: .rounded, weight: .semibold))
+                                .foregroundStyle(BJDesign.Palette.grayBlue)
                                 .padding(.horizontal)
-                                .padding(.top, BJDesign.Spacing.md)
+                                .padding(.top, BJDesign.Spacing.lg)
                                 .submitLabel(.next)
                                 .onSubmit { contentFocused = true }
 
                             Divider()
-                                .padding(.horizontal)
+                                .padding(.horizontal, BJDesign.Spacing.md)
 
                             // Content
                             TextEditor(text: $content)
-                                .font(.body)
-                                .padding(.horizontal, 12)
-                                .focused($contentFocused)
-                                .frame(minHeight: 200)
+                                .font(.system(.body, design: .rounded))
+                                .foregroundStyle(BJDesign.Palette.grayBlue)
                                 .scrollContentBackground(.hidden)
+                                .frame(minHeight: 250)
+                                .padding(.horizontal, BJDesign.Spacing.md)
+                                .padding(.vertical, BJDesign.Spacing.sm)
+                                .focused($contentFocused)
                                 .onChange(of: content) { _, _ in
                                     debounceMoodAnalysis()
                                 }
@@ -132,18 +138,21 @@ struct EntryEditorView: View {
                             // Mood display — single source of truth
                             if let emotion = storeEntry?.resolvedEmotion ?? liveEmotion {
                                 HStack {
-                                    SentimentTagView(sentiment: emotion)
+                                    SentimentTagView(sentiment: emotion) {
+                                        showEmotionPicker = true
+                                    }
                                     Spacer()
                                     if let score = storeEntry?.moodScore {
                                         moodConfidenceView(score)
                                     }
                                 }
-                                .padding(.horizontal)
+                                .padding(.horizontal, BJDesign.Spacing.lg)
                                 .transition(.opacity.combined(with: .scale(scale: 0.9)))
                             }
 
                             Spacer(minLength: 80)
                         }
+                        .padding(.horizontal, BJDesign.Spacing.sm)
                     }
 
                     // Attachment toolbar
@@ -290,13 +299,14 @@ struct EntryEditorView: View {
                     Text("Draw")
                         .font(.system(.caption2, design: .rounded, weight: .medium))
                 }
-                .foregroundStyle(showDrawingCanvas ? .purple : .secondary)
+                .foregroundStyle(showDrawingCanvas ? BJDesign.Palette.warmOrange : .secondary)
                 .frame(maxWidth: .infinity)
             }
             .buttonStyle(.plain)
         }
         .padding(.vertical, 10)
         .padding(.horizontal)
+        .background(BJDesign.Palette.cream.opacity(0.9))
         .background(.ultraThinMaterial)
     }
 
@@ -317,14 +327,15 @@ struct EntryEditorView: View {
     private var emotionPickerSheet: some View {
         VStack(spacing: 20) {
             // Header
-            VStack(spacing: 6) {
-                Image(systemName: "brain.head.profile")
-                    .font(.system(size: 32))
-                    .foregroundStyle(.purple)
+            VStack(spacing: 8) {
+                // Show small mood character in picker
+                CanonicalMoodView(sentiment: liveEmotion, size: 60)
+
                 Text("How are you feeling?")
-                    .font(.title3.weight(.semibold))
+                    .font(.system(.title3, design: .rounded, weight: .semibold))
+                    .foregroundStyle(BJDesign.Palette.grayBlue)
                 Text("We detected a few possible emotions. Tap the one that feels most accurate.")
-                    .font(.subheadline)
+                    .font(.system(.subheadline, design: .rounded))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
@@ -348,8 +359,8 @@ struct EntryEditorView: View {
                                     .frame(width: 32)
 
                                 Text(sentiment.displayName)
-                                    .font(.body.weight(.medium))
-                                    .foregroundStyle(.primary)
+                                    .font(.system(.body, design: .rounded, weight: .medium))
+                                    .foregroundStyle(BJDesign.Palette.grayBlue)
 
                                 Spacer()
 
@@ -362,15 +373,37 @@ struct EntryEditorView: View {
                                 .frame(width: 60, height: 8)
 
                                 Text("\(Int(candidate.probability * 100))%")
-                                    .font(.caption.weight(.medium))
+                                    .font(.system(.caption, design: .rounded, weight: .medium))
                                     .foregroundStyle(.secondary)
                                     .frame(width: 36, alignment: .trailing)
                             }
                             .padding(.horizontal, 16)
                             .padding(.vertical, 14)
-                            .background(sentiment.color.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                            .background(
+                                RoundedRectangle(cornerRadius: BJDesign.Radius.medium, style: .continuous)
+                                    .fill(sentiment.color.opacity(0.08))
+                            )
                         }
                         .buttonStyle(.plain)
+                    }
+                }
+
+                // Full palette — let user browse all moods
+                Divider().padding(.vertical, 4)
+
+                Text("Or choose from all moods")
+                    .font(.system(.caption, design: .rounded))
+                    .foregroundStyle(.secondary)
+
+                FlowLayout(spacing: 8) {
+                    ForEach(Sentiment.allCases, id: \.self) { sentiment in
+                        SentimentTagView(sentiment: sentiment) {
+                            if let entryID = savedEntryID {
+                                store.confirmUserEmotion(for: entryID, emotion: sentiment)
+                            }
+                            showEmotionPicker = false
+                            BJHaptic.success()
+                        }
                     }
                 }
             }
@@ -381,14 +414,15 @@ struct EntryEditorView: View {
                 showEmotionPicker = false
             } label: {
                 Text("Skip")
-                    .font(.subheadline)
+                    .font(.system(.subheadline, design: .rounded))
                     .foregroundStyle(.secondary)
             }
             .padding(.bottom)
 
             Spacer()
         }
-        .presentationDetents([.medium])
+        .background(BJDesign.Palette.cream)
+        .presentationDetents([.large])
         .presentationDragIndicator(.visible)
     }
 

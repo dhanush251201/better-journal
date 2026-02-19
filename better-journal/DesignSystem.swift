@@ -21,8 +21,25 @@ extension Color {
     }
 }
 
-/// Design tokens for the Better Journal app.
+/// Design tokens for the Better Journal app — Headspace-inspired.
 enum BJDesign {
+
+    // MARK: - Headspace Palette
+
+    enum Palette {
+        /// Warm cream background
+        static let cream       = Color(hex: "fdf5eb")
+        /// Primary accent — warm orange
+        static let warmOrange  = Color(hex: "f58b44")
+        /// Secondary accent — deep coral
+        static let deepCoral   = Color(hex: "e8614d")
+        /// Text — grounding gray-blue
+        static let grayBlue    = Color(hex: "4b5161")
+        /// Soft sand for card backgrounds
+        static let sand        = Color(hex: "f7eed7")
+        /// Muted lavender for subtle accents
+        static let softLavender = Color(hex: "c9b8d9")
+    }
 
     // MARK: - Mood Colors
 
@@ -59,8 +76,8 @@ enum BJDesign {
         static let largeTitle   = Font.system(.largeTitle, design: .rounded, weight: .bold)
         static let title        = Font.system(.title2, design: .rounded, weight: .semibold)
         static let headline     = Font.system(.headline, design: .rounded, weight: .medium)
-        static let body         = Font.system(.body, design: .default, weight: .regular)
-        static let caption      = Font.system(.caption, design: .default, weight: .regular)
+        static let body         = Font.system(.body, design: .rounded, weight: .regular)
+        static let caption      = Font.system(.caption, design: .rounded, weight: .regular)
         static let captionBold  = Font.system(.caption, design: .rounded, weight: .medium)
         static let moodLabel    = Font.system(.caption2, design: .rounded, weight: .semibold)
     }
@@ -79,18 +96,19 @@ enum BJDesign {
     // MARK: - Corner Radius
 
     enum Radius {
-        static let small: CGFloat  = 8
-        static let medium: CGFloat = 12
-        static let large: CGFloat  = 16
+        static let small: CGFloat  = 10
+        static let medium: CGFloat = 16
+        static let large: CGFloat  = 20
+        static let xlarge: CGFloat = 28
         static let pill: CGFloat   = 100
     }
 
     // MARK: - Shadows
 
     enum Shadow {
-        static let soft = (color: Color.black.opacity(0.06), radius: CGFloat(8), y: CGFloat(2))
-        static let medium = (color: Color.black.opacity(0.1), radius: CGFloat(12), y: CGFloat(4))
-        static let glow = (color: Color.black.opacity(0.04), radius: CGFloat(20), y: CGFloat(0))
+        static let soft = (color: Color.black.opacity(0.04), radius: CGFloat(12), y: CGFloat(3))
+        static let medium = (color: Color.black.opacity(0.07), radius: CGFloat(16), y: CGFloat(5))
+        static let glow = (color: Color.black.opacity(0.03), radius: CGFloat(24), y: CGFloat(0))
     }
 }
 
@@ -111,7 +129,14 @@ enum BJAnimation {
 struct BJCardStyle: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: BJDesign.Radius.large))
+            .background(
+                RoundedRectangle(cornerRadius: BJDesign.Radius.large, style: .continuous)
+                    .fill(BJDesign.Palette.cream.opacity(0.85))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: BJDesign.Radius.large, style: .continuous)
+                            .fill(.ultraThinMaterial)
+                    )
+            )
             .shadow(
                 color: BJDesign.Shadow.soft.color,
                 radius: BJDesign.Shadow.soft.radius,
@@ -202,6 +227,18 @@ enum InsightPalette {
         case "reflective", "nostalgic":       return [lavender, lilac]
         default:                              return [neutralGray, neutralMist]
         }
+    }
+
+    // MARK: - CanonicalMood typed overloads
+
+    /// Type-safe color for canonical mood.
+    static func color(for mood: CanonicalMood) -> Color {
+        mood.color
+    }
+
+    /// Type-safe gradient for canonical mood.
+    static func gradient(for mood: CanonicalMood) -> [Color] {
+        mood.gradient
     }
 }
 

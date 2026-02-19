@@ -47,6 +47,9 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             ZStack {
+                // Warm cream base
+                BJDesign.Palette.cream.ignoresSafeArea()
+
                 // Mood gradient background — reads from resolvedEmotion
                 MoodGradientBackground(emotion: store.entries.first?.resolvedEmotion)
 
@@ -73,7 +76,7 @@ struct ContentView: View {
                         Image(systemName: "chart.line.uptrend.xyaxis.circle.fill")
                             .font(.title3)
                             .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(.purple)
+                            .foregroundStyle(BJDesign.Palette.warmOrange)
                     }
                 }
                 ToolbarItem(placement: .primaryAction) {
@@ -137,18 +140,22 @@ struct ContentView: View {
             VStack(spacing: 10) {
                 Image(systemName: "sun.max.fill")
                     .font(.title2)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(BJDesign.Palette.warmOrange)
                 Text(dailyMessage)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
+                    .font(.system(.subheadline, design: .rounded, weight: .medium))
+                    .foregroundStyle(BJDesign.Palette.grayBlue)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(20)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(
-                RoundedRectangle(cornerRadius: BJDesign.Radius.large)
-                    .fill(.ultraThinMaterial)
+                RoundedRectangle(cornerRadius: BJDesign.Radius.large, style: .continuous)
+                    .fill(BJDesign.Palette.cream.opacity(0.9))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: BJDesign.Radius.large, style: .continuous)
+                            .fill(.ultraThinMaterial)
+                    )
             )
             .padding(.horizontal, 16)
 
@@ -157,10 +164,10 @@ struct ContentView: View {
                 VStack(spacing: 10) {
                     Image(systemName: "brain.head.profile.fill")
                         .font(.title2)
-                        .foregroundStyle(.purple)
+                        .foregroundStyle(BJDesign.Palette.softLavender)
                     Text(insight)
-                        .font(.subheadline)
-                        .fontWeight(.medium)
+                        .font(.system(.subheadline, design: .rounded, weight: .medium))
+                        .foregroundStyle(BJDesign.Palette.grayBlue)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                         .lineLimit(4)
@@ -168,26 +175,33 @@ struct ContentView: View {
                 .padding(20)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(
-                    RoundedRectangle(cornerRadius: BJDesign.Radius.large)
-                        .fill(.ultraThinMaterial)
+                    RoundedRectangle(cornerRadius: BJDesign.Radius.large, style: .continuous)
+                        .fill(BJDesign.Palette.cream.opacity(0.9))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: BJDesign.Radius.large, style: .continuous)
+                                .fill(.ultraThinMaterial)
+                        )
                 )
                 .padding(.horizontal, 16)
             }
 
-            // Slide 3: Mood Ring (if enough data)
+            // Slide 3: Mood Character (if enough data)
             if !store.moodSummaries.isEmpty {
-                VStack(spacing: 8) {
-                    MoodRingView(
-                        averageValence: store.moodSummaries.map(\.averageValence).reduce(0, +) / Double(max(1, store.moodSummaries.count)),
-                        averageArousal: store.moodSummaries.map(\.averageArousal).reduce(0, +) / Double(max(1, store.moodSummaries.count))
+                VStack(spacing: 4) {
+                    CanonicalMoodView(
+                        sentiment: store.entries.first?.resolvedEmotion,
+                        size: 80
                     )
-                    .frame(width: 90, height: 90)
                 }
-                .padding(20)
+                .padding(12)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(
-                    RoundedRectangle(cornerRadius: BJDesign.Radius.large)
-                        .fill(.ultraThinMaterial)
+                    RoundedRectangle(cornerRadius: BJDesign.Radius.large, style: .continuous)
+                        .fill(BJDesign.Palette.cream.opacity(0.9))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: BJDesign.Radius.large, style: .continuous)
+                                .fill(.ultraThinMaterial)
+                        )
                 )
                 .padding(.horizontal, 16)
             }
@@ -197,12 +211,12 @@ struct ContentView: View {
                 VStack(spacing: 6) {
                     Image(systemName: "flame.fill")
                         .font(.title2)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(BJDesign.Palette.warmOrange)
                     Text(verbatim: "\(current)")
-                        .font(.title)
-                        .fontWeight(.bold)
+                        .font(.system(.title, design: .rounded, weight: .bold))
+                        .foregroundStyle(BJDesign.Palette.grayBlue)
                     Text("Current Streak")
-                        .font(.caption)
+                        .font(.system(.caption, design: .rounded))
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity)
@@ -213,12 +227,12 @@ struct ContentView: View {
                 VStack(spacing: 6) {
                     Image(systemName: "trophy.fill")
                         .font(.title2)
-                        .foregroundStyle(.yellow)
+                        .foregroundStyle(Color(hex: "FFD700"))
                     Text(verbatim: "\(longest)")
-                        .font(.title)
-                        .fontWeight(.bold)
+                        .font(.system(.title, design: .rounded, weight: .bold))
+                        .foregroundStyle(BJDesign.Palette.grayBlue)
                     Text("Longest Streak")
-                        .font(.caption)
+                        .font(.system(.caption, design: .rounded))
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity)
@@ -226,8 +240,12 @@ struct ContentView: View {
             .padding(20)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(
-                RoundedRectangle(cornerRadius: BJDesign.Radius.large)
-                    .fill(.ultraThinMaterial)
+                RoundedRectangle(cornerRadius: BJDesign.Radius.large, style: .continuous)
+                    .fill(BJDesign.Palette.cream.opacity(0.9))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: BJDesign.Radius.large, style: .continuous)
+                            .fill(.ultraThinMaterial)
+                    )
             )
             .padding(.horizontal, 16)
         }
@@ -238,18 +256,18 @@ struct ContentView: View {
     // MARK: - Empty State
 
     private var emptyState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "book.closed")
-                .font(.system(size: 56))
-                .foregroundStyle(.secondary)
+        VStack(spacing: 16) {
+            // Show the character in a neutral state
+            CanonicalMoodView(mood: .calm, size: 120)
                 .scaleEffect(appeared ? 1.0 : 0.8)
                 .animation(BJAnimation.springGentle, value: appeared)
 
             Text("No Entries Yet")
                 .font(BJDesign.Typography.title)
+                .foregroundStyle(BJDesign.Palette.grayBlue)
 
             Text("Tap the pencil icon to write your first entry.")
-                .font(.subheadline)
+                .font(.system(.subheadline, design: .rounded))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }
@@ -264,10 +282,15 @@ struct ContentView: View {
         List {
             ForEach(store.entries) { entry in
                 NavigationLink(destination: EntryEditorView(store: store, entry: entry)) {
-                    EntryRowView(entry: entry)
+                    EntryRowView(entry: entry, store: store)
                 }
             }
             .onDelete(perform: store.delete)
+            .listRowBackground(
+                RoundedRectangle(cornerRadius: BJDesign.Radius.medium, style: .continuous)
+                    .fill(BJDesign.Palette.cream.opacity(0.6))
+                    .padding(.vertical, 2)
+            )
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
@@ -278,6 +301,7 @@ struct ContentView: View {
 
 struct EntryRowView: View {
     let entry: JournalEntry
+    let store: JournalStore
     @State private var appeared = false
 
     private var formattedDate: String {
@@ -288,9 +312,9 @@ struct EntryRowView: View {
         HStack(spacing: 0) {
             // Mood indicator bar — single source of truth
             MoodIndicatorBar(sentiment: entry.resolvedEmotion)
-                .padding(.vertical, 4)
+                .padding(.vertical, 6)
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 8) {
                 // Photo collage thumbnail
                 if let collage = entry.collage, !collage.isEmpty {
                     CollageDisplayView(collageData: collage, height: 100)
@@ -316,7 +340,7 @@ struct EntryRowView: View {
                 // Content preview
                 if !entry.content.isEmpty {
                     Text(entry.content)
-                        .font(.subheadline)
+                        .font(.system(.subheadline, design: .rounded))
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
@@ -324,8 +348,11 @@ struct EntryRowView: View {
                 // Mood badges — all from resolvedEmotion
                 HStack(spacing: 8) {
                     if let emotion = entry.resolvedEmotion {
-                        SentimentTagView(sentiment: emotion)
-                            .transition(.scale.combined(with: .opacity))
+                        SentimentTagView(sentiment: emotion) {
+                            // On tap → allow user to change mood
+                            store.confirmUserEmotion(for: entry.id, emotion: emotion)
+                        }
+                        .transition(.scale.combined(with: .opacity))
                     }
 
                     if let score = entry.moodScore {
@@ -351,17 +378,17 @@ struct EntryRowView: View {
                                 Text(confidenceLabel(score.overallConfidence))
                                     .font(.system(.caption2, design: .rounded))
                             }
-                            .foregroundStyle(.purple.opacity(0.6))
+                            .foregroundStyle(BJDesign.Palette.softLavender.opacity(0.8))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 3)
-                            .background(.purple.opacity(0.08), in: Capsule())
+                            .background(BJDesign.Palette.softLavender.opacity(0.1), in: Capsule())
                         }
 
                         // Conflict warning
                         if score.hadConflict {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .font(.caption2)
-                                .foregroundStyle(.orange.opacity(0.7))
+                                .foregroundStyle(BJDesign.Palette.warmOrange.opacity(0.7))
                         }
                     }
                 }

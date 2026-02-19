@@ -60,18 +60,18 @@ enum Sentiment: String, Codable, CaseIterable {
 
     var color: Color {
         switch self {
-        case .happy: return .yellow
-        case .grateful: return .pink
-        case .calm: return .mint
-        case .excited: return .orange
-        case .hopeful: return .cyan
-        case .reflective: return .indigo
-        case .nostalgic: return .purple
-        case .anxious: return .gray
-        case .sad: return .blue
-        case .frustrated: return .red
-        case .stressed: return .orange
-        case .neutral: return .gray
+        case .happy: return Color(hex: "FFD700")       // Golden yellow
+        case .grateful: return Color(hex: "E88DA1")     // Rose pink
+        case .calm: return Color(hex: "6BC5D2")         // Soft teal
+        case .excited: return Color(hex: "F58B44")      // Warm orange
+        case .hopeful: return Color(hex: "76C7A0")      // Sage green
+        case .reflective: return Color(hex: "8B7EC8")   // Warm indigo
+        case .nostalgic: return Color(hex: "C49BBD")    // Dusty mauve
+        case .anxious: return Color(hex: "E8A838")      // Amber
+        case .sad: return Color(hex: "5B8DB8")          // Steel blue
+        case .frustrated: return Color(hex: "E8614D")   // Deep coral
+        case .stressed: return Color(hex: "C97B5D")     // Burnt sienna
+        case .neutral: return Color(hex: "9BA3AF")      // Cool gray
         }
     }
 
@@ -117,14 +117,26 @@ enum Sentiment: String, Codable, CaseIterable {
 
 struct SentimentTagView: View {
     let sentiment: Sentiment
+    var onTap: (() -> Void)? = nil
 
     var body: some View {
-        Label(sentiment.displayName, systemImage: sentiment.iconName)
-            .font(.caption)
-            .fontWeight(.medium)
-            .foregroundStyle(sentiment.color)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(sentiment.color.opacity(0.15), in: Capsule())
+        Button {
+            onTap?()
+        } label: {
+            Label(sentiment.displayName, systemImage: sentiment.iconName)
+                .font(.system(.caption, design: .rounded, weight: .semibold))
+                .foregroundStyle(sentiment.color)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(
+                    Capsule()
+                        .fill(sentiment.color.opacity(0.12))
+                        .overlay(
+                            Capsule()
+                                .strokeBorder(sentiment.color.opacity(0.25), lineWidth: 1)
+                        )
+                )
+        }
+        .buttonStyle(.plain)
     }
 }

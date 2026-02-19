@@ -49,13 +49,34 @@ struct InsightsTabView: View {
                         .animation(InsightAnimation.cardEntrance.delay(0.1), value: appeared)
                 }
 
-                // MARK: - Mood Distribution
+                // MARK: - Mood Character
                 if !distribution.isEmpty {
-                    MoodDistributionRing(distribution: distribution)
-                        .padding(.horizontal, BJDesign.Spacing.lg)
-                        .opacity(appeared ? 1 : 0)
-                        .offset(y: appeared ? 0 : 20)
-                        .animation(InsightAnimation.cardEntrance.delay(0.2), value: appeared)
+                    VStack(spacing: 12) {
+                        // Derive canonical mood from top distribution category
+                        let topSentiment = distribution.first.flatMap { Sentiment(rawValue: $0.category) }
+                        let canonical = MoodNormalizer.canonicalMood(from: topSentiment)
+
+                        CanonicalMoodView(mood: canonical, size: 140)
+
+                        // Show canonical mood label
+                        Text("Mostly \(canonical.displayName)")
+                            .font(.system(.subheadline, design: .rounded, weight: .medium))
+                            .foregroundStyle(BJDesign.Palette.grayBlue)
+                    }
+                    .padding(BJDesign.Spacing.xl)
+                    .frame(maxWidth: .infinity)
+                    .background(
+                        RoundedRectangle(cornerRadius: BJDesign.Radius.large, style: .continuous)
+                            .fill(BJDesign.Palette.cream.opacity(0.85))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: BJDesign.Radius.large, style: .continuous)
+                                    .fill(.ultraThinMaterial)
+                            )
+                    )
+                    .padding(.horizontal, BJDesign.Spacing.lg)
+                    .opacity(appeared ? 1 : 0)
+                    .offset(y: appeared ? 0 : 20)
+                    .animation(InsightAnimation.cardEntrance.delay(0.2), value: appeared)
                 }
 
                 // MARK: - Natural Language Insights
