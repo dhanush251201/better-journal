@@ -106,7 +106,7 @@ struct InsightsTabView: View {
                 Spacer(minLength: 60)
             }
         }
-        .background(MoodGradientBackground(moodScore: nil))
+        .background(BJDesign.Palette.cream.ignoresSafeArea())
         .onAppear { loadInsights() }
         .fullScreenCover(isPresented: $showRecap) {
             RecapCardStack(cards: recapCards)
@@ -117,7 +117,7 @@ struct InsightsTabView: View {
                     MoodHeatmapView(days: heatmapDays)
                         .padding(.vertical, BJDesign.Spacing.xl)
                 }
-                .background(MoodGradientBackground(moodScore: nil))
+                .background(BJDesign.Palette.cream.ignoresSafeArea())
                 .navigationTitle("Year in Review")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {

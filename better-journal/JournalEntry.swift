@@ -42,6 +42,29 @@ struct JournalEntry: Identifiable, Codable {
         return sentiment
     }
 
+    /// Top resolved emotions (up to 2) when probabilities are close.
+    /// Shows only the dominant one if it's clearly ahead (> 1.5x the runner-up).
+    var resolvedEmotions: [Sentiment] {
+        if let userEmotion { return [userEmotion] }
+        guard let score = moodScore else {
+            return sentiment.map { [$0] } ?? []
+        }
+        let candidates = score.topEmotions.prefix(2)
+        guard let first = candidates.first,
+              let firstSentiment = Sentiment(rawValue: first.emotion) else {
+            return resolvedEmotion.map { [$0] } ?? []
+        }
+        // Only show second if it's close to the first (within 1.5x)
+        if candidates.count >= 2 {
+            let second = candidates[candidates.index(after: candidates.startIndex)]
+            if second.probability >= 0.25 && first.probability < second.probability * 1.5,
+               let secondSentiment = Sentiment(rawValue: second.emotion) {
+                return [firstSentiment, secondSentiment]
+            }
+        }
+        return [firstSentiment]
+    }
+
     init(
         id: UUID = UUID(),
         title: String = "",

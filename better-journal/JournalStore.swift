@@ -22,6 +22,7 @@ import SwiftUI
 class JournalStore {
     var entries: [JournalEntry] = []
     var journalInsight: String?
+    var moodQuote: String?
     var moodSummaries: [MoodSummary] = []
     var personalityProfile: PersonalityProfile?
 
@@ -49,6 +50,7 @@ class JournalStore {
     /// Debounced refresh tasks — cancelled and re-created on each trigger
     private var insightTask: Task<Void, Never>?
     private var profileTask: Task<Void, Never>?
+    private var quoteTask: Task<Void, Never>?
 
     // MARK: - Init
 
@@ -69,6 +71,7 @@ class JournalStore {
 
         load()
         scheduleRefreshInsight()
+        scheduleRefreshMoodQuote()
     }
 
     // MARK: - CRUD
@@ -192,6 +195,7 @@ class JournalStore {
                     self.saveEngineState(kalman: kalman, baseline: baseline, calibration: calibration)
                     self.scheduleRefreshInsight()
                     self.scheduleRefreshProfiles()
+                    self.scheduleRefreshMoodQuote()
 
                     // Persist to siloed analytics store (fire-and-forget)
                     let savedEntry = self.entries[index]
@@ -227,6 +231,28 @@ class JournalStore {
         guard let insight = await SentimentAnalyzer.generateInsight(from: recentEntries) else { return }
         await MainActor.run {
             journalInsight = insight
+        }
+    }
+
+    // MARK: - Debounced Mood Quote
+
+    private func scheduleRefreshMoodQuote() {
+        quoteTask?.cancel()
+        quoteTask = Task {
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            await performRefreshMoodQuote()
+        }
+    }
+
+    private func performRefreshMoodQuote() async {
+        guard let emotion = entries.first?.resolvedEmotion else {
+            await MainActor.run { moodQuote = nil }
+            return
+        }
+        guard let quote = await SentimentAnalyzer.generateMoodQuote(for: emotion) else { return }
+        await MainActor.run {
+            moodQuote = quote
         }
     }
 

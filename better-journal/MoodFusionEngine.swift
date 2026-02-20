@@ -110,17 +110,13 @@ actor MoodFusionEngine {
 
         // ─── 3. Conflict Detection ───
 
-        // Check if modalities disagree on top emotion
-        let modalityTopEmotions = calibrated.map { $0.emotionDistribution.dominantEmotion }
-        let uniqueTopEmotions = Set(modalityTopEmotions)
-        let emotionConflict = calibrated.count > 1 && uniqueTopEmotions.count == calibrated.count
-
-        // Also check valence disagreement
+        // Check valence disagreement — only flag when modalities truly contradict
+        // (e.g., one strongly positive, the other strongly negative)
         let valences = calibrated.map(\.valence)
         let maxDisagreement = (valences.max() ?? 0) - (valences.min() ?? 0)
-        let valenceConflict = maxDisagreement > 1.0
+        let valenceConflict = maxDisagreement > 1.4
 
-        let hadConflict = emotionConflict || valenceConflict
+        let hadConflict = valenceConflict
         let conflictPenalty = hadConflict ? max(0.3, 1.0 - maxDisagreement / 2.0) : 1.0
 
         // ─── 4. Overall Confidence ───

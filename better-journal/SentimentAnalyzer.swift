@@ -371,6 +371,29 @@ struct SentimentAnalyzer {
         }
     }
 
+    // MARK: - Mood Quote Generation
+
+    /// Generate a short, personalized quote based on the user's current dominant mood.
+    static func generateMoodQuote(for emotion: Sentiment) async -> String? {
+        guard SystemLanguageModel.default.availability == .available else {
+            return nil
+        }
+
+        let prompt = """
+        You are a warm, poetic companion. The user is feeling \(emotion.displayName.lowercased()) right now. \
+        Write a single short sentence (under 15 words) that acknowledges their mood and gently uplifts them. \
+        No quotes, no attribution — just the sentence.
+        """
+
+        do {
+            let session = LanguageModelSession()
+            let response = try await session.respond(to: prompt)
+            return response.content
+        } catch {
+            return nil
+        }
+    }
+
     // MARK: - Helpers
 
     /// Tokenize text to lowercase words

@@ -111,21 +111,15 @@ actor ImageAnalysisEngine {
 
     // MARK: - Vision: Scene Classification
 
-    private func classifyScene(_ image: CGImage) async throws -> [(label: String, prob: Float)] {
-        try await withCheckedThrowingContinuation { cont in
-            let request = VNClassifyImageRequest { request, error in
-                if let error { cont.resume(throwing: error); return }
-                let results = (request.results as? [VNClassificationObservation]) ?? []
-                let filtered = results
-                    .filter { $0.confidence > 0.10 }
-                    .prefix(15)
-                    .map { ($0.identifier, $0.confidence) }
-                cont.resume(returning: Array(filtered))
-            }
-            let handler = VNImageRequestHandler(cgImage: image, options: [:])
-            do { try handler.perform([request]) }
-            catch { cont.resume(throwing: error) }
-        }
+    private func classifyScene(_ image: CGImage) throws -> [(label: String, prob: Float)] {
+        let request = VNClassifyImageRequest()
+        let handler = VNImageRequestHandler(cgImage: image, options: [:])
+        try handler.perform([request])
+        let results = (request.results as? [VNClassificationObservation]) ?? []
+        return results
+            .filter { $0.confidence > 0.10 }
+            .prefix(15)
+            .map { ($0.identifier, $0.confidence) }
     }
 
     // MARK: - Vision: Face Landmarks → Expression
@@ -136,43 +130,37 @@ actor ImageAnalysisEngine {
         let boundingBox: CGRect
     }
 
-    private func detectFaceLandmarks(_ image: CGImage) async throws -> [FaceResult] {
-        try await withCheckedThrowingContinuation { cont in
-            let request = VNDetectFaceLandmarksRequest { request, error in
-                if let error { cont.resume(throwing: error); return }
-                let faces = (request.results as? [VNFaceObservation]) ?? []
-                let results = faces.compactMap { face -> FaceResult? in
-                    guard let outerLips = face.landmarks?.outerLips,
-                          outerLips.pointCount >= 6 else {
-                        return FaceResult(smileProbability: 0.3, frownProbability: 0.2,
-                                         boundingBox: face.boundingBox)
-                    }
-
-                    let points = outerLips.normalizedPoints
-                    let xs = points.map(\.x)
-                    let ys = points.map(\.y)
-                    let lipWidth = (xs.max() ?? 0) - (xs.min() ?? 0)
-                    let lipHeight = max(0.001, (ys.max() ?? 0) - (ys.min() ?? 0))
-                    let aspectRatio = lipWidth / lipHeight
-
-                    // Smiling: aspect ratio > 3.0. Neutral ~2.0. Frown < 1.5
-                    let smileProb = min(1.0, max(0, (aspectRatio - 1.5) / 3.0))
-
-                    // Also check corners: if mouth corners are lower than center → frown
-                    let leftCorner = points.first?.y ?? 0
-                    let rightCorner = points.last?.y ?? 0
-                    let centerY = ys.reduce(0, +) / CGFloat(ys.count)
-                    let cornerDrop = centerY - min(leftCorner, rightCorner)
-                    let frownProb = min(1.0, max(0, Double(cornerDrop) * 3.0))
-
-                    return FaceResult(smileProbability: smileProb, frownProbability: frownProb,
-                                     boundingBox: face.boundingBox)
-                }
-                cont.resume(returning: results)
+    private func detectFaceLandmarks(_ image: CGImage) throws -> [FaceResult] {
+        let request = VNDetectFaceLandmarksRequest()
+        let handler = VNImageRequestHandler(cgImage: image, options: [:])
+        try handler.perform([request])
+        let faces = (request.results as? [VNFaceObservation]) ?? []
+        return faces.compactMap { face -> FaceResult? in
+            guard let outerLips = face.landmarks?.outerLips,
+                  outerLips.pointCount >= 6 else {
+                return FaceResult(smileProbability: 0.3, frownProbability: 0.2,
+                                 boundingBox: face.boundingBox)
             }
-            let handler = VNImageRequestHandler(cgImage: image, options: [:])
-            do { try handler.perform([request]) }
-            catch { cont.resume(throwing: error) }
+
+            let points = outerLips.normalizedPoints
+            let xs = points.map(\.x)
+            let ys = points.map(\.y)
+            let lipWidth = (xs.max() ?? 0) - (xs.min() ?? 0)
+            let lipHeight = max(0.001, (ys.max() ?? 0) - (ys.min() ?? 0))
+            let aspectRatio = lipWidth / lipHeight
+
+            // Smiling: aspect ratio > 3.0. Neutral ~2.0. Frown < 1.5
+            let smileProb = min(1.0, max(0, (aspectRatio - 1.5) / 3.0))
+
+            // Also check corners: if mouth corners are lower than center → frown
+            let leftCorner = points.first?.y ?? 0
+            let rightCorner = points.last?.y ?? 0
+            let centerY = ys.reduce(0, +) / CGFloat(ys.count)
+            let cornerDrop = centerY - min(leftCorner, rightCorner)
+            let frownProb = min(1.0, max(0, Double(cornerDrop) * 3.0))
+
+            return FaceResult(smileProbability: smileProb, frownProbability: frownProb,
+                             boundingBox: face.boundingBox)
         }
     }
 

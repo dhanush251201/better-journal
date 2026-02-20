@@ -27,16 +27,28 @@ enum BJDesign {
     // MARK: - Headspace Palette
 
     enum Palette {
-        /// Warm cream background
-        static let cream       = Color(hex: "fdf5eb")
+        /// Warm cream background (adaptive)
+        static let cream = Color(UIColor { trait in
+            trait.userInterfaceStyle == .dark
+                ? UIColor(red: 0x1c/255, green: 0x1c/255, blue: 0x1e/255, alpha: 1)  // #1c1c1e
+                : UIColor(red: 0xfd/255, green: 0xf5/255, blue: 0xeb/255, alpha: 1)  // #fdf5eb
+        })
         /// Primary accent — warm orange
         static let warmOrange  = Color(hex: "f58b44")
         /// Secondary accent — deep coral
         static let deepCoral   = Color(hex: "e8614d")
-        /// Text — grounding gray-blue
-        static let grayBlue    = Color(hex: "4b5161")
-        /// Soft sand for card backgrounds
-        static let sand        = Color(hex: "f7eed7")
+        /// Text — grounding gray-blue (adaptive)
+        static let grayBlue = Color(UIColor { trait in
+            trait.userInterfaceStyle == .dark
+                ? UIColor(red: 0xe5/255, green: 0xe5/255, blue: 0xea/255, alpha: 1)  // #e5e5ea
+                : UIColor(red: 0x4b/255, green: 0x51/255, blue: 0x61/255, alpha: 1)  // #4b5161
+        })
+        /// Soft sand for card backgrounds (adaptive)
+        static let sand = Color(UIColor { trait in
+            trait.userInterfaceStyle == .dark
+                ? UIColor(red: 0x2c/255, green: 0x2c/255, blue: 0x2e/255, alpha: 1)  // #2c2c2e
+                : UIColor(red: 0xf7/255, green: 0xee/255, blue: 0xd7/255, alpha: 1)  // #f7eed7
+        })
         /// Muted lavender for subtle accents
         static let softLavender = Color(hex: "c9b8d9")
     }
@@ -65,9 +77,17 @@ enum BJDesign {
         static let pewter       = Color(hex: "D5DBDB")
         static let stormGray    = Color(hex: "90A4AE")
 
-        // Neutral
-        static let warmGray     = Color(hex: "F5F5F5")
-        static let nearWhite    = Color(hex: "FAFAFA")
+        // Neutral (adaptive)
+        static let warmGray = Color(UIColor { trait in
+            trait.userInterfaceStyle == .dark
+                ? UIColor(red: 0x2c/255, green: 0x2c/255, blue: 0x2e/255, alpha: 1)  // #2c2c2e
+                : UIColor(red: 0xF5/255, green: 0xF5/255, blue: 0xF5/255, alpha: 1)  // #F5F5F5
+        })
+        static let nearWhite = Color(UIColor { trait in
+            trait.userInterfaceStyle == .dark
+                ? UIColor(red: 0x1c/255, green: 0x1c/255, blue: 0x1e/255, alpha: 1)  // #1c1c1e
+                : UIColor(red: 0xFA/255, green: 0xFA/255, blue: 0xFA/255, alpha: 1)  // #FAFAFA
+        })
     }
 
     // MARK: - Typography

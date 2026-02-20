@@ -69,7 +69,7 @@ struct WeeklyInsightView: View {
                 Spacer(minLength: 40)
             }
         }
-        .background(MoodGradientBackground(moodScore: nil))
+        .background(BJDesign.Palette.cream.ignoresSafeArea())
         .onAppear { appeared = true }
     }
 

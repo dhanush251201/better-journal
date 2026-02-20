@@ -83,15 +83,7 @@ struct EntryEditorView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                // Warm cream base
                 BJDesign.Palette.cream.ignoresSafeArea()
-
-                // Mood-reactive gradient background
-                if hasMoodEstimate, let live = liveEmotion {
-                    MoodGradientBackground(emotion: live, arousal: liveArousal)
-                } else {
-                    MoodGradientBackground(emotion: storeEntry?.resolvedEmotion)
-                }
 
                 VStack(spacing: 0) {
                     // Scrollable content area
@@ -135,11 +127,17 @@ struct EntryEditorView: View {
                                 inlineDrawingSection
                             }
 
-                            // Mood display — single source of truth
-                            if let emotion = storeEntry?.resolvedEmotion ?? liveEmotion {
-                                HStack {
-                                    SentimentTagView(sentiment: emotion) {
-                                        showEmotionPicker = true
+                            // Mood display — show up to 2 emotions
+                            let emotions = storeEntry?.resolvedEmotions
+                                ?? (liveEmotion.map { [$0] } ?? [])
+                            if !emotions.isEmpty {
+                                HStack(alignment: .top) {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        ForEach(emotions, id: \.self) { emotion in
+                                            SentimentTagView(sentiment: emotion) {
+                                                showEmotionPicker = true
+                                            }
+                                        }
                                     }
                                     Spacer()
                                     if let score = storeEntry?.moodScore {
@@ -492,6 +490,17 @@ struct EntryEditorView: View {
         }
 
         if let existing = existingEntry {
+            // If everything is cleared, delete the entry
+            let isEmpty = trimmedTitle.isEmpty && trimmedContent.isEmpty
+                && collage == nil && finalDrawingID == nil
+            if isEmpty {
+                if let index = store.entries.firstIndex(where: { $0.id == existing.id }) {
+                    store.delete(at: IndexSet(integer: index))
+                }
+                dismiss()
+                return
+            }
+
             var updated = existing
             updated.title = trimmedTitle
             updated.content = trimmedContent

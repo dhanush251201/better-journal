@@ -109,7 +109,7 @@ actor AnalysisPipeline {
         bl.update(valence: smoothedValence, arousal: smoothedArousal)
         baseline = bl
         let zScore = baseline.zScore(valence: smoothedValence)
-        let label = UserBaseline.label(forZScore: zScore)
+        let label: String? = zScore != nil ? UserBaseline.label(forZScore: zScore) : nil
 
         // ─── Assemble MoodScore ───
 
